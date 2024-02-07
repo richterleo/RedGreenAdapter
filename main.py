@@ -35,9 +35,9 @@ log = logging.getLogger(__name__)
 class PromptDataset(Dataset):
     def __init__(self, tokenizer, path=None, name=None):
         assert path or name
-        if path: 
+        try: 
             data = json.load(open(path, 'r'))
-        else:
+        except FileNotFoundError:
             data = load_dataset("allenai/common_gen")
         self.items = [v for k, v in data.items() if v['human_order']]
         self.tokenizer = tokenizer
