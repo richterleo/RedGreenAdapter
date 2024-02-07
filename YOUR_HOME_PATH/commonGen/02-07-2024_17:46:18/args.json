@@ -40,8 +40,8 @@
   "cuda_deterministic": true,
   "resume": null,
   "cuda": true,
-  "save_dir": "YOUR_HOME_PATH/commonGen/02-07-2024_13:57:53",
-  "reward_dir": "YOUR_HOME_PATH/commonGen/02-07-2024_13:57:53/reward",
-  "model_dir": "YOUR_HOME_PATH/commonGen/02-07-2024_13:57:53/model",
-  "tensorboard_dir": "YOUR_HOME_PATH/commonGen/tensorboard/02-07-2024_13:57:53"
+  "save_dir": "YOUR_HOME_PATH/commonGen/02-07-2024_17:46:18",
+  "reward_dir": "YOUR_HOME_PATH/commonGen/02-07-2024_17:46:18/reward",
+  "model_dir": "YOUR_HOME_PATH/commonGen/02-07-2024_17:46:18/model",
+  "tensorboard_dir": "YOUR_HOME_PATH/commonGen/tensorboard/02-07-2024_17:46:18"
 }
