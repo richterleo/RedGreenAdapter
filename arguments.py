@@ -44,8 +44,9 @@ def get_args():
         '--target_entropy', type=float, default=40, help='target value in adaptive entropy controller')
 
     # policy
+    # change base model for now bc of storage issues
     parser.add_argument(
-        '--base_model_name', type=str, default='gpt2-xl', help='language model as the base policy.')
+        '--base_model_name', type=str, default='gpt2-large', help='language model as the base policy.')
     parser.add_argument(
         '--base_model_checkpoint', type=str, default="PATH_TO_DISTILLED_GPT3", help='base policy initialization')
     parser.add_argument(

@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, Optimizer
 from torch.optim.lr_scheduler import LambdaLR
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 from transformers import get_linear_schedule_with_warmup
 
 from arguments import get_args
@@ -23,13 +23,22 @@ from reward import Reward
 from utils.utils import ensure_dir, ceil_div, reduce_mean, reduce_sum
 from utils.generation_utils import decode
 
+# additional imports by me
+from transformers import GPT2Model
+from datasets import load_dataset
+
+
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
 log = logging.getLogger(__name__)
 
 
 class PromptDataset(Dataset):
-    def __init__(self, path, tokenizer):
-        data = json.load(open(path, 'r'))
+    def __init__(self, tokenizer, path=None, name=None):
+        assert path or name
+        if path: 
+            data = json.load(open(path, 'r'))
+        else:
+            data = load_dataset("allenai/common_gen")
         self.items = [v for k, v in data.items() if v['human_order']]
         self.tokenizer = tokenizer
 
@@ -381,10 +390,17 @@ def main():
     tree_tokens = [' _TREE_TOKEN_{}'.format(str(idx).zfill(5)) for idx in range(args.n_extra_tokens)]
 
     log.info(f'Initializing models ...')
-    policy_checkpoint = torch.load(args.base_model_checkpoint, map_location='cpu')['policy_model']
-    policy = Policy(base_model_name=args.base_model_name, base_model_checkpoint=policy_checkpoint,
-                    value_model_name=args.value_model_name, device=device, tree_tokens=tree_tokens, alpha=args.alpha,
-                    calibrate=args.gpt3_calibrate, force_eos=args.force_eos)
+    try:
+        policy_checkpoint = torch.load(args.base_model_checkpoint, map_location='cpu')['policy_model']
+        policy = Policy(base_model_name=args.base_model_name, base_model_checkpoint=policy_checkpoint,
+                value_model_name=args.value_model_name, device=device, tree_tokens=tree_tokens, alpha=args.alpha,
+                calibrate=args.gpt3_calibrate, force_eos=args.force_eos)
+    except FileNotFoundError:
+        #policy_checkpoint = GPT2Model.from_pretrained('gpt2-large')
+        policy = Policy(base_model_name=args.base_model_name, value_model_name=args.value_model_name, 
+                device=device, tree_tokens=tree_tokens, alpha=args.alpha,
+                calibrate=args.gpt3_calibrate, force_eos=args.force_eos)
+    
     reward = Reward(save_path=args.reward_dir, batch_size=args.reward_batch_size, device=num_gpus - 1, params=args)
     data_pool = DataPool(tree_tokens=tree_tokens, n_extra_tokens=args.n_extra_tokens)
     log.info(f'Initialization done!')

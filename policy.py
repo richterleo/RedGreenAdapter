@@ -11,11 +11,12 @@ from utils.generation_utils import add_control_code, get_model_output, remove_co
 
 
 class Policy:
-    def __init__(self, base_model_name, base_model_checkpoint, value_model_name, device, tree_tokens,
-                 alpha, calibrate, force_eos):
+    def __init__(self, base_model_name, value_model_name, device, tree_tokens,
+                 alpha, calibrate, force_eos, base_model_checkpoint=None):
         self.device = device
         self.base_model = GPT2LMHeadModel.from_pretrained(base_model_name)
-        self.base_model.load_state_dict(base_model_checkpoint)
+        if base_model_checkpoint: 
+            self.base_model.load_state_dict(base_model_checkpoint)
         self.value_model = GPT2LMHeadModel.from_pretrained(value_model_name)
 
         self.tokenizer = GPT2Tokenizer.from_pretrained(base_model_name, pad_token="<|endoftext|>")
@@ -24,6 +25,8 @@ class Policy:
 
         self.tokenizer.add_tokens(tree_tokens, special_tokens=True)
 
+        # We add some tokens and initialize them
+        # Don't want to compute gradients for these operations
         weights = self.value_model.get_input_embeddings().weight.detach().numpy()
         mean_weights, std_weights = np.mean(weights, axis=0), np.std(weights, axis=0)
         new_inits = np.vstack([np.random.normal(loc=mean_weights, scale=std_weights) for _ in tree_tokens])
