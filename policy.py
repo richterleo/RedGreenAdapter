@@ -13,6 +13,7 @@ from utils.generation_utils import add_control_code, get_model_output, remove_co
 class Policy:
     def __init__(self, base_model_name, value_model_name, device, tree_tokens,
                  alpha, calibrate, force_eos, base_model_checkpoint=None):
+        
         self.device = device
         self.base_model = GPT2LMHeadModel.from_pretrained(base_model_name)
         if base_model_checkpoint: 

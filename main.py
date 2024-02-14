@@ -13,10 +13,9 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam, Optimizer
 from torch.optim.lr_scheduler import LambdaLR
-#from torch.utils.tensorboard import SummaryWriter
 from transformers import get_linear_schedule_with_warmup
 
-from arguments import get_args
+from arguments import Args
 from policy import Policy
 from data_pool import DataPool
 from reward import Reward
@@ -30,87 +29,6 @@ from datasets import load_dataset
 
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
 log = logging.getLogger(__name__)
-
-
-class PromptDataset(Dataset):
-    def __init__(self, tokenizer, path=None, name=None):
-        assert path or name
-        try: 
-            data = json.load(open(path, 'r'))
-        except FileNotFoundError:
-            data = load_dataset("allenai/common_gen")
-        self.items = [v for k, v in data.items() if v['human_order']]
-        self.tokenizer = tokenizer
-
-    def __len__(self):
-        return len(self.items)
-
-    def __getitem__(self, idx):
-        item = self.items[idx]
-        order_words = random.choice(item['human_order'])
-        constraint = json.dumps([list(map(lambda x: self.tokenizer.encode(f' {x}'), item['inflection'][w]))
-                                 for w in order_words.split('-')])
-        prompt = 'Generate a sentence including the following keywords in the same order as listed: %s\n\nAnswer:'
-        prompt = prompt % ' '.join(order_words.split('-'))
-
-        return {
-            'order': order_words,
-            'constraint': constraint,
-            'prompt': prompt,
-        }
-
-
-class PromptCollator(object):
-    def __init__(self, tokenizer):
-        self.tokenizer = tokenizer
-
-    def __call__(self, sequences):
-        concepts = [sequence['order'] for sequence in sequences]
-        prompts = [sequence['prompt'] for sequence in sequences]
-        constraints = [sequence['constraint'] for sequence in sequences]
-
-        encodings_dict = self.tokenizer(prompts, return_tensors="pt", padding=True)
-        input_ids = encodings_dict['input_ids']
-        attention_mask = encodings_dict['attention_mask']
-
-        return input_ids, attention_mask, concepts, constraints
-
-
-class SequenceDataset(Dataset):
-    def __init__(self, data_pool: DataPool):
-        self.queries, self.responses, self.cat_tokens = data_pool.get_data()
-
-    def __len__(self):
-        return len(self.queries)
-
-    def __getitem__(self, idx):
-        return {'query': self.queries[idx],
-                'response': self.responses[idx],
-                'cat_tokens': self.cat_tokens[idx]
-                }
-
-
-class SequenceCollator(object):
-    def __init__(self, tokenizer):
-        self.tokenizer = tokenizer
-
-    def __call__(self, sequences):
-        queries = [sequence['query'] for sequence in sequences]
-        responses = [sequence['response'] + self.tokenizer.eos_token for sequence in sequences]
-        cat_ids = [self.tokenizer.convert_tokens_to_ids(sequence['cat_tokens']) for sequence in sequences]
-
-        query_encodings_dict = self.tokenizer(queries, return_tensors="pt", padding=True)
-        query_input_ids = query_encodings_dict['input_ids']
-        query_mask = query_encodings_dict['attention_mask']
-
-        query_input_ids = torch.cat([query_input_ids.new(cat_ids)[:, None], query_input_ids], dim=1)
-        query_mask = torch.cat([query_mask.new([1] * len(query_mask))[:, None], query_mask], dim=1)
-
-        response_encodings_dict = self.tokenizer(responses, return_tensors="pt", padding=True)
-        response_input_ids = response_encodings_dict['input_ids']
-        response_mask = response_encodings_dict['attention_mask']
-
-        return query_input_ids, query_mask, response_input_ids, response_mask
 
 
 class FixedController:
@@ -157,7 +75,7 @@ class ConditionTrainer:
         self.scheduler = scheduler
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
-        self.writer = SummaryWriter(log_dir=params.tensorboard_dir)
+        #self.writer = SummaryWriter(log_dir=params.tensorboard_dir)
 
         if self.params.adaptive_kl:
             self.kl_ctl = AdaptiveController(self.params.kl_coef, self.params.target_kl, self.params.horizon)
@@ -353,8 +271,8 @@ class ConditionTrainer:
 
 
 def main():
-    args = get_args()
 
+    args = Args()
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -365,9 +283,8 @@ def main():
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    num_gpus = torch.cuda.device_count()
-    log.info(f'Detect {num_gpus} GPUS')
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    log.info(f'Detect {args.num_gpus} GPUS')
+    device = 'cuda' if args.cuda else 'cpu'
 
     if args.resume is None:
         date_time = datetime.now().strftime("%m-%d-%Y_%H:%M:%S")
@@ -397,11 +314,11 @@ def main():
                 calibrate=args.gpt3_calibrate, force_eos=args.force_eos)
     except FileNotFoundError:
         #policy_checkpoint = GPT2Model.from_pretrained('gpt2-large')
-        policy = Policy(base_model_name=args.base_model_name, value_model_name=args.value_model_name, 
+        policy = Policy(base_model_name=args.base_model, value_model_name=args.value_model_name, 
                 device=device, tree_tokens=tree_tokens, alpha=args.alpha,
                 calibrate=args.gpt3_calibrate, force_eos=args.force_eos)
     
-    reward = Reward(save_path=args.reward_dir, batch_size=args.reward_batch_size, device=num_gpus - 1, params=args)
+    reward = Reward(save_path=args.reward_dir, batch_size=args.reward_batch_size, device=args.num_gpus - 1, params=args)
     data_pool = DataPool(tree_tokens=tree_tokens, n_extra_tokens=args.n_extra_tokens)
     log.info(f'Initialization done!')
 
