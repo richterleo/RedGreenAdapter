@@ -1,3 +1,5 @@
+# run: conda env create --file environment.yml
+
 name: redgreen
 channels:
   - pytorch
