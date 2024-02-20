@@ -95,6 +95,7 @@ config = PPOwithAdapterConfig(
     mini_batch_size=script_args.mini_batch_size,
     batch_size=script_args.batch_size,
     gradient_accumulation_steps=script_args.gradient_accumulation_steps,
+    remove_unused_columns=False
 )
 
 
