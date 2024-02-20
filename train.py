@@ -31,7 +31,8 @@ from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer, create
 from trl.core import LengthSampler
 
 # my stuff
-from utils import build_dataset
+from utils import build_dataset, collator
+from PPO_adapter import PPOwithAdapterConfig, PPOwithAdapterTrainer
 
 
 tqdm.pandas()
@@ -67,7 +68,8 @@ class ScriptArguments:
 
     # NOTE: gpt2 models use Conv1D instead of Linear layers which are not yet supported in 8 bit mode
     # models like gpt-neo* models are more suitable.
-    model_name: Optional[str] = field(default="ybelkada/gpt-j-6b-sharded-bf16", metadata={"help": "the model name"})
+    base_model_name: Optional[str] = field(default="ybelkada/gpt-j-6b-sharded-bf16", metadata={"help": "the base model name"})
+    adapter_model_name: Optional[str] = field(default="ybelkada/gpt-j-6b-sharded-bf16", metadata={"help": "the base model name"})
     log_with: Optional[str] = field(default=None, metadata={"help": "use 'wandb' to log with wandb"})
     learning_rate: Optional[float] = field(default=(1.47e-5) * 2, metadata={"help": "the learning rate"})
     mini_batch_size: Optional[int] = field(default=4, metadata={"help": "the PPO minibatch size"})
@@ -84,8 +86,9 @@ class ScriptArguments:
 parser = HfArgumentParser(ScriptArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
 
-config = PPOConfig(
-    model_name=script_args.model_name,
+config = PPOwithAdapterConfig(
+    base_model_name=script_args.base_model_name,
+    adapter_model_name=script_args.adapter_model_name,
     learning_rate=script_args.learning_rate,
     log_with=script_args.log_with,
     ppo_epochs=10, # NOTE: changed this to 10
@@ -99,7 +102,9 @@ config = PPOConfig(
 # We retrieve the dataloader by calling the `build_dataset` function.
 min_input_length = 30
 max_input_length = 40
-dataset = build_dataset(config, input_min_text_length=min_input_length, input_max_text_length=max_input_length)
+dataset = build_dataset(config, 
+                        input_min_text_length=min_input_length, 
+                        input_max_text_length=max_input_length)
 
 
 def collator(data):
@@ -111,27 +116,29 @@ set_seed(config.seed)
 
 # Now let's build the model, the reference model, and the tokenizer. We first load the model
 # in bfloat16 to save memory using `transformers`.
-model = AutoModelForCausalLM.from_pretrained(config.model_name, torch_dtype=torch.bfloat16)
+adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name, torch_dtype=torch.bfloat16)
 # And then we pass the loaded model to `AutoModelForCausalLMWithValueHead`.
-model = AutoModelForCausalLMWithValueHead.from_pretrained(model)
+adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(adapter_model)
 
 # We create a reference model by sharing 20 layers
-ref_model = create_reference_model(model, num_shared_layers=20)
+ref_model = create_reference_model(adapter_model, num_shared_layers=20)
 
 # We make sure to use `Adam` optimizer on the model parameters that require gradients.
-optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=config.learning_rate)
+optimizer = Adam(filter(lambda p: p.requires_grad, adapter_model.parameters()), lr=config.learning_rate)
 
 # GPT-2 / GPT-J tokenizer has a pad token, but it is not eos_token by default. We need to set it to eos_token.
 # only for this model.
-tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-tokenizer.pad_token = tokenizer.eos_token
+adapter_tokenizer = AutoTokenizer.from_pretrained(config.adapter_model_name)
+adapter_tokenizer.pad_token = adapter_tokenizer.eos_token
 
 # We then build the PPOTrainer, passing the model, the reference model, the tokenizer
-ppo_trainer = PPOTrainer(
+ppo_trainer = PPOwithAdapterTrainer(
     config,
-    model,
+    base_model=base_model,
+    base_tokenizer=base_tokenizer,
+    adapter_model=adapter_model,
     ref_model=ref_model,
-    tokenizer=tokenizer,
+    adapter_tokenizer=adapter_tokenizer,
     dataset=dataset,
     data_collator=collator,
     optimizer=optimizer,

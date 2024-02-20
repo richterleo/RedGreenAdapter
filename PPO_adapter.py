@@ -6,16 +6,17 @@ from datasets import Dataset
 from typing import Optional, Union, Callable, List
 
 from transformers import (
-    DataCollatorForLanguageModeling
+    DataCollatorForLanguageModeling,
+    HfArgumentParser,
+    PreTrainedTokenizerBase, 
+    PreTrainedTokenizer, 
+    PreTrainedTokenizerFast
 )
 
 from trl import (
     PPOTrainer, 
     PPOConfig, 
     PreTrainedModelWrapper, 
-    PreTrainedTokenizerBase, 
-    PreTrainedTokenizer, 
-    PreTrainedTokenizerFast
 )
 
 @dataclass
@@ -154,3 +155,41 @@ class PPOwithAdapterTrainer(PPOTrainer):
 
         
         
+if __name__ == "__main__":
+    
+    @dataclass
+    class ScriptArguments:
+        """
+        The name of the Casual LM model we wish to fine-tune with PPO
+        """
+
+        # NOTE: gpt2 models use Conv1D instead of Linear layers which are not yet supported in 8 bit mode
+        # models like gpt-neo* models are more suitable.
+        base_model_name: Optional[str] = field(default="ybelkada/gpt-j-6b-sharded-bf16", metadata={"help": "the base model name"})
+        adapter_model_name: Optional[str] = field(default="ybelkada/gpt-j-6b-sharded-bf16", metadata={"help": "the base model name"})
+        log_with: Optional[str] = field(default=None, metadata={"help": "use 'wandb' to log with wandb"})
+        learning_rate: Optional[float] = field(default=(1.47e-5) * 2, metadata={"help": "the learning rate"})
+        mini_batch_size: Optional[int] = field(default=4, metadata={"help": "the PPO minibatch size"})
+        batch_size: Optional[int] = field(default=16, metadata={"help": "the batch size"})
+        gradient_accumulation_steps: Optional[int] = field(
+            default=1, metadata={"help": "the number of gradient accumulation steps"}
+        )
+        model_save_path: Optional[str] = field(
+            default="./gpt-j-6B-detoxified-long-context-26-shl-1e4-final",
+            metadata={"help": "the path to save the model"},
+        )
+
+
+    parser = HfArgumentParser(ScriptArguments)
+    script_args = parser.parse_args_into_dataclasses()[0]
+
+    config = PPOwithAdapterConfig(
+        base_model_name=script_args.base_model_name,
+        adapter_model_name=script_args.adapter_model_name,
+        learning_rate=script_args.learning_rate,
+        log_with=script_args.log_with,
+        ppo_epochs=10, # NOTE: changed this to 10
+        mini_batch_size=script_args.mini_batch_size,
+        batch_size=script_args.batch_size,
+        gradient_accumulation_steps=script_args.gradient_accumulation_steps,
+    )
