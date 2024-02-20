@@ -1,4 +1,6 @@
 import torch
+
+from copy import deepcopy
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -50,17 +52,17 @@ class ProductModel(torch.nn.Module):
 
         return combined_probs
     
-    def __getattr__(self, name):
-        '''
-        Want this to behave like a pretrained_model
-        '''
-        return getattr(self.adapter_model, name)
+    @property
+    def __class__(self):
+        return self.adapter_model.__class__
+
+
         
     
     
 def create_reference_model_from_product(product_model, num_shared_layers):
     
-    copied_model = product_model.deepcopy(product_model)
+    copied_model = deepcopy(product_model)
     copied_model.adapter_model = create_reference_model(copied_model.adapter_model, num_shared_layers)
     
     return copied_model

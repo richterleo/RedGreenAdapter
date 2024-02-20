@@ -69,8 +69,8 @@ class ScriptArguments:
 
     # NOTE: gpt2 models use Conv1D instead of Linear layers which are not yet supported in 8 bit mode
     # models like gpt-neo* models are more suitable.
-    base_model_name: Optional[str] = field(default="openai-community/gpt2-xl", metadata={"help": "the base model name"})
-    adapter_model_name: Optional[str] = field(default="openai-community/gpt2-large", metadata={"help": "the base model name"})
+    base_model_name: Optional[str] = field(default="openai-community/gpt2-large", metadata={"help": "the base model name"})
+    adapter_model_name: Optional[str] = field(default="openai-community/gpt2", metadata={"help": "the base model name"})
     log_with: Optional[str] = field(default=None, metadata={"help": "use 'wandb' to log with wandb"})
     learning_rate: Optional[float] = field(default=(1.47e-5) * 2, metadata={"help": "the learning rate"})
     mini_batch_size: Optional[int] = field(default=4, metadata={"help": "the PPO minibatch size"})
@@ -107,7 +107,7 @@ set_seed(config.seed)
 product_model = ProductModel(config.base_model_name, config.adapter_model_name)
 
 # We create a reference model by sharing 20 layers
-ref_model = create_reference_model_from_product(product_model, num_shared_layers=20)
+ref_model = create_reference_model_from_product(product_model, num_shared_layers=4)
 
 # We make sure to use `Adam` optimizer on the model parameters that require gradients.
 optimizer = Adam(filter(lambda p: p.requires_grad, product_model.adapter_model.parameters()), lr=config.learning_rate)
@@ -129,9 +129,9 @@ dataset = build_dataset(config,
 # We then build the PPOTrainer, passing the model, the reference model, the tokenizer
 ppo_trainer = PPOwithAdapterTrainer(
     config,
-    product_model=product_model as PreTrained,
+    product_model=product_model,
     tokenizer=tokenizer,
-    adapter_ref_model=ref_model,
+    ref_model=ref_model,
     dataset=dataset,
     data_collator=collator,
     optimizer=optimizer,
@@ -165,16 +165,15 @@ output_length_sampler = LengthSampler(output_min_length, output_max_length)
 
 for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
     
-    base_query_tensors = batch["input_ids_base"]
-    adapter_query_tensors = batch["input_ids_adapter"]
+    query_tensors = batch["input_ids"]
 
     # Get response from the policy model
     response_tensors = []
-    for base_query, adapter_query in zip(base_query_tensors, adapter_query_tensors):
+    for query in query_tensors:
         gen_len = output_length_sampler()
         generation_kwargs["max_new_tokens"] = gen_len
         
-        response = ppo_trainer.generate(adapter_query, **generation_kwargs)
+        response = ppo_trainer.generate(query, **generation_kwargs)
         response_tensors.append(response.squeeze()[-gen_len:])
         
         

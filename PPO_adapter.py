@@ -39,10 +39,9 @@ class PPOwithAdapterTrainer(PPOTrainer):
     def __init__(
         self,
         config: PPOwithAdapterConfig = None,
-        base_model: PreTrainedModelWrapper = None,
+        product_model: PreTrainedModelWrapper = None,
         tokenizer:PreTrainedTokenizerBase = None,
-        adapter_model: PreTrainedModelWrapper = None,
-        adapter_ref_model: Optional[PreTrainedModelWrapper] = None,
+        ref_model: Optional[PreTrainedModelWrapper] = None,
         dataset: Optional[Union[torch.utils.data.Dataset, Dataset]] = None,
         optimizer: Optional[torch.optim.Optimizer] = None,
         data_collator: Optional[typing.Callable] = None,
@@ -53,8 +52,8 @@ class PPOwithAdapterTrainer(PPOTrainer):
         super().__init__(
             # PPOwithAdapterConfig passes type check of PPOConfig
             config=config, 
-            model=adapter_model,
-            ref_model=adapter_ref_model, 
+            model=product_model,
+            ref_model=ref_model, 
             tokenizer=tokenizer,
             dataset=dataset, 
             optimizer=optimizer, 
@@ -68,12 +67,8 @@ class PPOwithAdapterTrainer(PPOTrainer):
             raise ValueError(f"config must be a PPOwithAdapterConfig, got {type(config)}")
         
         # Base model is not updated, gradients are not recorded
-        self.base_model = base_model
-        for param in self.base_model.parameters():
-            param.requires_grad = False
         
         # Data collator depends on tokenizer
-        self.base_data_collator = DataCollatorForLanguageModeling(self.base_tokenizer, mlm=False)
         # TODO: find out if it's a problem that the accelerator.prepare method uses the other data collator
 
 
