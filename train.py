@@ -30,6 +30,9 @@ from transformers import (
 from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer, create_reference_model, set_seed
 from trl.core import LengthSampler
 
+# my stuff
+from utils import build_dataset
+
 
 tqdm.pandas()
 
@@ -91,52 +94,6 @@ config = PPOConfig(
     gradient_accumulation_steps=script_args.gradient_accumulation_steps,
 )
 
-
-# Below is an example function to build the dataset. In our case, we use the IMDB dataset
-# from the `datasets` library. One should customize this function to train the model on
-# its own dataset.
-def build_dataset(
-    config, dataset_name="allenai/real-toxicity-prompts", input_min_text_length=5, input_max_text_length=10
-):
-    """
-    Build dataset for training. This builds the dataset from `load_dataset`, one should
-    customize this function to train the model on its own dataset.
-
-    Args:
-        dataset_name (`str`):
-            The name of the dataset to be loaded.
-
-    Returns:
-        dataloader (`torch.utils.data.DataLoader`):
-            The dataloader for the dataset.
-    """
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-    tokenizer.pad_token = tokenizer.eos_token
-
-    ds = load_dataset(dataset_name, split="train")
-
-    def filter_fn(sample):
-        toxicity = sample["prompt"]["toxicity"]
-        return toxicity is not None and toxicity > 0.3
-
-    ds = ds.filter(filter_fn, batched=False)
-
-    input_size = LengthSampler(input_min_text_length, input_max_text_length)
-
-    def tokenize(sample):
-        prompt = sample["prompt"]["text"]
-        continuation = sample["continuation"]["text"]
-
-        sample["input_ids"] = tokenizer.encode(prompt + continuation)[: input_size()]
-        sample["query"] = tokenizer.decode(sample["input_ids"])
-        return sample
-
-    ds = ds.map(tokenize, batched=False)
-    ds.set_format(type="torch")
-
-    ds = ds.train_test_split(test_size=0.2, shuffle=False)["train"]
-
-    return ds
 
 
 # We retrieve the dataloader by calling the `build_dataset` function.

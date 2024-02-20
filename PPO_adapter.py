@@ -1,12 +1,22 @@
-from trl import PPOTrainer, PPOConfig, PreTrainedModelWrapper, PreTrainedTokenizerBase
-
 import torch
-from typing import Optional, Union, Callable, List
 import typing
-from datasets import Dataset
 
 from dataclasses import dataclass, field
+from datasets import Dataset
+from typing import Optional, Union, Callable, List
 
+from transformers import (
+    DataCollatorForLanguageModeling
+)
+
+from trl import (
+    PPOTrainer, 
+    PPOConfig, 
+    PreTrainedModelWrapper, 
+    PreTrainedTokenizerBase, 
+    PreTrainedTokenizer, 
+    PreTrainedTokenizerFast
+)
 
 @dataclass
 class PPOwithAdapterConfig(PPOConfig):
@@ -29,6 +39,7 @@ class PPOwithAdapterTrainer(PPOTrainer):
         self,
         config: PPOwithAdapterConfig = None,
         base_model: PreTrainedModelWrapper = None,
+        base_tokenizer:PreTrainedTokenizerBase = None,
         adapter_model: PreTrainedModelWrapper = None,
         adapter_ref_model: Optional[PreTrainedModelWrapper] = None,
         adapter_tokenizer: PreTrainedTokenizerBase = None,
@@ -60,17 +71,29 @@ class PPOwithAdapterTrainer(PPOTrainer):
         self.base_model = base_model
         for param in self.base_model.parameters():
             param.requires_grad = False
+            
+        # Base model also needs tokenizer
+        if not isinstance(base_tokenizer, (PreTrainedTokenizerBase)):
+            raise ValueError(
+                f"tokenizer must be a PreTrainedTokenizerBase like a PreTrainedTokenizer or a \
+                PreTrainedTokenizerFast, got {type(base_tokenizer)}"
+            )
+        if not (isinstance(base_tokenizer, PreTrainedTokenizer) or isinstance(base_tokenizer, PreTrainedTokenizerFast)):
+            raise ValueError(
+                "tokenizer must be a transformers.PreTrainedTokenizer or transformers.PreTrainedTokenizerFast"
+            )
+        self.base_tokenizer = base_tokenizer
+        
+        # Data collator depends on tokenizer
+        self.base_data_collator = DataCollatorForLanguageModeling(self.base_tokenizer, mlm=False)
+        # TODO: find out if it's a problem that the accelerator.prepare method uses the other data collator
 
-        # "model" in PPOTrainer class is now "adapter_model"
-        self.adapter_model = adapter_model
-        self.adapter_model_params = filter(lambda p: p.requires_grad, self.adapter_model.parameters())
-        self.is_encoder_decoder = hasattr(self.model, "is_encoder_decoder")
-        self.is_peft_model = getattr(self.model, "is_peft_model", False)
-        config.is_encoder_decoder = self.is_encoder_decoder
-        config.is_peft_model = self.is_peft_model
+
+        # TODO: find way to rename the model attribute (and everything depending on that) to adapter_model
         
         
-    def generate_base_response(
+        
+    def generate_base(
         self,
         query_tensor: Union[torch.Tensor, List[torch.Tensor]],
         length_sampler: Callable = None,
@@ -118,11 +141,11 @@ class PPOwithAdapterTrainer(PPOTrainer):
 
             if length_sampler is not None:
                 generation_kwargs["max_new_tokens"] = length_sampler()
-            response = self.accelerator.unwrap_model(self.model).generate(
+            response = self.accelerator.unwrap_model(self.base_model).generate(
                 input_ids=query_tensor.unsqueeze(dim=0), **generation_kwargs
             )
 
-            if not return_prompt and not self.is_encoder_decoder:
+            if not return_prompt:
                 response = response[:, query_tensor.shape[0] :]
 
 
