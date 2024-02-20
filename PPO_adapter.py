@@ -193,3 +193,5 @@ if __name__ == "__main__":
         batch_size=script_args.batch_size,
         gradient_accumulation_steps=script_args.gradient_accumulation_steps,
     )
+    
+    print(config.__dict__)

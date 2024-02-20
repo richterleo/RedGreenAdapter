@@ -68,8 +68,8 @@ class ScriptArguments:
 
     # NOTE: gpt2 models use Conv1D instead of Linear layers which are not yet supported in 8 bit mode
     # models like gpt-neo* models are more suitable.
-    base_model_name: Optional[str] = field(default="ybelkada/gpt-j-6b-sharded-bf16", metadata={"help": "the base model name"})
-    adapter_model_name: Optional[str] = field(default="ybelkada/gpt-j-6b-sharded-bf16", metadata={"help": "the base model name"})
+    base_model_name: Optional[str] = field(default="openai-community/gpt2-xl", metadata={"help": "the base model name"})
+    adapter_model_name: Optional[str] = field(default="openai-community/gpt2-large", metadata={"help": "the base model name"})
     log_with: Optional[str] = field(default=None, metadata={"help": "use 'wandb' to log with wandb"})
     learning_rate: Optional[float] = field(default=(1.47e-5) * 2, metadata={"help": "the learning rate"})
     mini_batch_size: Optional[int] = field(default=4, metadata={"help": "the PPO minibatch size"})
@@ -78,7 +78,7 @@ class ScriptArguments:
         default=1, metadata={"help": "the number of gradient accumulation steps"}
     )
     model_save_path: Optional[str] = field(
-        default="./gpt-j-6B-detoxified-long-context-26-shl-1e4-final",
+        default="./Test",
         metadata={"help": "the path to save the model"},
     )
 
@@ -99,29 +99,24 @@ config = PPOwithAdapterConfig(
 
 
 
-# We retrieve the dataloader by calling the `build_dataset` function.
-min_input_length = 30
-max_input_length = 40
-dataset = build_dataset(config, 
-                        input_min_text_length=min_input_length, 
-                        input_max_text_length=max_input_length)
-
-
-def collator(data):
-    return dict((key, [d[key] for d in data]) for key in data[0])
-
-
 # set seed before initializing value head for deterministic eval
 set_seed(config.seed)
 
 # Now let's build the model, the reference model, and the tokenizer. We first load the model
 # in bfloat16 to save memory using `transformers`.
-adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name, torch_dtype=torch.bfloat16)
+# Problem: for gpt2 based models bfloat16 is not yet supported
+# adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name, torch_dtype=torch.bfloat16)
+adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name)
 # And then we pass the loaded model to `AutoModelForCausalLMWithValueHead`.
 adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(adapter_model)
 
 # We create a reference model by sharing 20 layers
 ref_model = create_reference_model(adapter_model, num_shared_layers=20)
+
+# Build the base model
+base_model = AutoModelForCausalLM.from_pretrained(config.base_model_name)
+# And then we pass the loaded model to `AutoModelForCausalLMWithValueHead`.
+base_model = AutoModelForCausalLMWithValueHead.from_pretrained(base_model)
 
 # We make sure to use `Adam` optimizer on the model parameters that require gradients.
 optimizer = Adam(filter(lambda p: p.requires_grad, adapter_model.parameters()), lr=config.learning_rate)
@@ -131,13 +126,25 @@ optimizer = Adam(filter(lambda p: p.requires_grad, adapter_model.parameters()), 
 adapter_tokenizer = AutoTokenizer.from_pretrained(config.adapter_model_name)
 adapter_tokenizer.pad_token = adapter_tokenizer.eos_token
 
+base_tokenizer = AutoTokenizer.from_pretrained(config.base_model_name)
+base_tokenizer.pad_token = base_tokenizer.eos_token
+
+# We retrieve the dataloader by calling the `build_dataset` function.
+min_input_length = 30
+max_input_length = 40
+dataset = build_dataset(config, 
+                        input_min_text_length=min_input_length, 
+                        input_max_text_length=max_input_length,
+                        base_tokenizer=base_tokenizer,
+                        adapter_tokenizer=adapter_tokenizer)
+
 # We then build the PPOTrainer, passing the model, the reference model, the tokenizer
 ppo_trainer = PPOwithAdapterTrainer(
     config,
     base_model=base_model,
     base_tokenizer=base_tokenizer,
     adapter_model=adapter_model,
-    ref_model=ref_model,
+    adapter_ref_model=ref_model,
     adapter_tokenizer=adapter_tokenizer,
     dataset=dataset,
     data_collator=collator,
@@ -154,50 +161,57 @@ toxicity_model = RobertaForSequenceClassification.from_pretrained(toxicity_model
 )
 
 
-# We then define the arguments to pass to the `generate` function. These arguments
-# are passed to the `generate` function of the PPOTrainer, which is a wrapper around
-# the `generate` function of the trained model.
-generation_kwargs = {
-    "min_length": -1,
-    "top_k": 0.0,
-    "top_p": 1.0,
-    "do_sample": True,
-    "pad_token_id": tokenizer.eos_token_id,
-}
-output_min_length = 20
-output_max_length = 30
-output_length_sampler = LengthSampler(output_min_length, output_max_length)
+# # We then define the arguments to pass to the `generate` function. These arguments
+# # are passed to the `generate` function of the PPOTrainer, which is a wrapper around
+# # the `generate` function of the trained model.
+# generation_kwargs = {
+#     "min_length": -1,
+#     "top_k": 0.0,
+#     "top_p": 1.0,
+#     "do_sample": True,
+#     "pad_token_id": tokenizer.eos_token_id,
+# }
+# output_min_length = 20
+# output_max_length = 30
+# output_length_sampler = LengthSampler(output_min_length, output_max_length)
 
-model_save_path = script_args.model_save_path
+# model_save_path = script_args.model_save_path
 
 for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
-    query_tensors = batch["input_ids"]
+    
+    query_tensors_base = batch["input_ids_base"]
+    query_tensors_adapter = batch["input_ids_adapter"]
+    
+    print(f"These are the query_tensors_base: {query_tensors_base} \
+        and these are the query_tensors_adapter: {query_tensors_adapter}")
+    
+    
 
     # Get response from the policy model
-    response_tensors = []
-    for query in query_tensors:
-        gen_len = output_length_sampler()
-        generation_kwargs["max_new_tokens"] = gen_len
-        response = ppo_trainer.generate(query, **generation_kwargs)
-        response_tensors.append(response.squeeze()[-gen_len:])
-    batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
+    # response_tensors = []
+    # for query in query_tensors:
+    #     gen_len = output_length_sampler()
+    #     generation_kwargs["max_new_tokens"] = gen_len
+    #     response = ppo_trainer.generate(query, **generation_kwargs)
+    #     response_tensors.append(response.squeeze()[-gen_len:])
+    # batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
 
-    # Compute sentiment score # noqa
-    texts = batch["response"]
-    toxicity_inputs = toxicity_tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(
-        ppo_trainer.accelerator.device
-    )
-    logits = toxicity_model(**toxicity_inputs).logits.float()
-    toxicity_labels = (logits[:, 0]).tolist()
+    # # Compute sentiment score # noqa
+    # texts = batch["response"]
+    # toxicity_inputs = toxicity_tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(
+    #     ppo_trainer.accelerator.device
+    # )
+    # logits = toxicity_model(**toxicity_inputs).logits.float()
+    # toxicity_labels = (logits[:, 0]).tolist()
 
-    rewards = [torch.tensor(output) for output in toxicity_labels]
+    # rewards = [torch.tensor(output) for output in toxicity_labels]
 
-    # Run PPO step
-    stats = ppo_trainer.step(query_tensors, response_tensors, rewards)
-    ppo_trainer.log_stats(stats, batch, rewards)
+    # # Run PPO step
+    # stats = ppo_trainer.step(query_tensors, response_tensors, rewards)
+    # ppo_trainer.log_stats(stats, batch, rewards)
 
-    # Save model every 100 epochs
-    if epoch % 100 == 0:
-        if ppo_trainer.accelerator.is_main_process:
-            ppo_trainer.save_pretrained(model_save_path)
+    # # Save model every 100 epochs
+    # if epoch % 100 == 0:
+    #     if ppo_trainer.accelerator.is_main_process:
+    #         ppo_trainer.save_pretrained(model_save_path)
 
