@@ -40,10 +40,9 @@ class PPOwithAdapterTrainer(PPOTrainer):
         self,
         config: PPOwithAdapterConfig = None,
         base_model: PreTrainedModelWrapper = None,
-        base_tokenizer:PreTrainedTokenizerBase = None,
+        tokenizer:PreTrainedTokenizerBase = None,
         adapter_model: PreTrainedModelWrapper = None,
         adapter_ref_model: Optional[PreTrainedModelWrapper] = None,
-        adapter_tokenizer: PreTrainedTokenizerBase = None,
         dataset: Optional[Union[torch.utils.data.Dataset, Dataset]] = None,
         optimizer: Optional[torch.optim.Optimizer] = None,
         data_collator: Optional[typing.Callable] = None,
@@ -56,7 +55,7 @@ class PPOwithAdapterTrainer(PPOTrainer):
             config=config, 
             model=adapter_model,
             ref_model=adapter_ref_model, 
-            tokenizer=adapter_tokenizer,
+            tokenizer=tokenizer,
             dataset=dataset, 
             optimizer=optimizer, 
             data_collator=data_collator, 
@@ -72,18 +71,6 @@ class PPOwithAdapterTrainer(PPOTrainer):
         self.base_model = base_model
         for param in self.base_model.parameters():
             param.requires_grad = False
-            
-        # Base model also needs tokenizer
-        if not isinstance(base_tokenizer, (PreTrainedTokenizerBase)):
-            raise ValueError(
-                f"tokenizer must be a PreTrainedTokenizerBase like a PreTrainedTokenizer or a \
-                PreTrainedTokenizerFast, got {type(base_tokenizer)}"
-            )
-        if not (isinstance(base_tokenizer, PreTrainedTokenizer) or isinstance(base_tokenizer, PreTrainedTokenizerFast)):
-            raise ValueError(
-                "tokenizer must be a transformers.PreTrainedTokenizer or transformers.PreTrainedTokenizerFast"
-            )
-        self.base_tokenizer = base_tokenizer
         
         # Data collator depends on tokenizer
         self.base_data_collator = DataCollatorForLanguageModeling(self.base_tokenizer, mlm=False)

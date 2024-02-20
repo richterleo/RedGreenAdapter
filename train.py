@@ -33,6 +33,7 @@ from trl.core import LengthSampler
 # my stuff
 from utils import build_dataset, collator
 from PPO_adapter import PPOwithAdapterConfig, PPOwithAdapterTrainer
+from product_of_experts import ProductModel, create_reference_model_from_product
 
 
 tqdm.pandas()
@@ -103,32 +104,19 @@ config = PPOwithAdapterConfig(
 # set seed before initializing value head for deterministic eval
 set_seed(config.seed)
 
-# Now let's build the model, the reference model, and the tokenizer. We first load the model
-# in bfloat16 to save memory using `transformers`.
-# Problem: for gpt2 based models bfloat16 is not yet supported
-# adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name, torch_dtype=torch.bfloat16)
-adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name)
-# And then we pass the loaded model to `AutoModelForCausalLMWithValueHead`.
-adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(adapter_model)
+product_model = ProductModel(config.base_model_name, config.adapter_model_name)
 
 # We create a reference model by sharing 20 layers
-ref_model = create_reference_model(adapter_model, num_shared_layers=20)
-
-# Build the base model
-base_model = AutoModelForCausalLM.from_pretrained(config.base_model_name)
-# And then we pass the loaded model to `AutoModelForCausalLMWithValueHead`.
-base_model = AutoModelForCausalLMWithValueHead.from_pretrained(base_model)
+ref_model = create_reference_model_from_product(product_model, num_shared_layers=20)
 
 # We make sure to use `Adam` optimizer on the model parameters that require gradients.
-optimizer = Adam(filter(lambda p: p.requires_grad, adapter_model.parameters()), lr=config.learning_rate)
+optimizer = Adam(filter(lambda p: p.requires_grad, product_model.adapter_model.parameters()), lr=config.learning_rate)
 
 # GPT-2 / GPT-J tokenizer has a pad token, but it is not eos_token by default. We need to set it to eos_token.
 # only for this model.
-adapter_tokenizer = AutoTokenizer.from_pretrained(config.adapter_model_name)
-adapter_tokenizer.pad_token = adapter_tokenizer.eos_token
-
-base_tokenizer = AutoTokenizer.from_pretrained(config.base_model_name)
-base_tokenizer.pad_token = base_tokenizer.eos_token
+# need to take tokenizer from smaller model #TODO ask if this might be a problem/ there's some better solution
+tokenizer = AutoTokenizer.from_pretrained(config.adapter_model_name)
+tokenizer.pad_token = tokenizer.eos_token
 
 # We retrieve the dataloader by calling the `build_dataset` function.
 min_input_length = 30
@@ -136,17 +124,14 @@ max_input_length = 40
 dataset = build_dataset(config, 
                         input_min_text_length=min_input_length, 
                         input_max_text_length=max_input_length,
-                        base_tokenizer=base_tokenizer,
-                        adapter_tokenizer=adapter_tokenizer)
+                        tokenizer=tokenizer)
 
 # We then build the PPOTrainer, passing the model, the reference model, the tokenizer
 ppo_trainer = PPOwithAdapterTrainer(
     config,
-    base_model=base_model,
-    base_tokenizer=base_tokenizer,
-    adapter_model=adapter_model,
+    product_model=product_model as PreTrained,
+    tokenizer=tokenizer,
     adapter_ref_model=ref_model,
-    adapter_tokenizer=adapter_tokenizer,
     dataset=dataset,
     data_collator=collator,
     optimizer=optimizer,
@@ -162,39 +147,37 @@ toxicity_model = RobertaForSequenceClassification.from_pretrained(toxicity_model
 )
 
 
-# # We then define the arguments to pass to the `generate` function. These arguments
-# # are passed to the `generate` function of the PPOTrainer, which is a wrapper around
-# # the `generate` function of the trained model.
-# generation_kwargs = {
-#     "min_length": -1,
-#     "top_k": 0.0,
-#     "top_p": 1.0,
-#     "do_sample": True,
-#     "pad_token_id": tokenizer.eos_token_id,
-# }
-# output_min_length = 20
-# output_max_length = 30
-# output_length_sampler = LengthSampler(output_min_length, output_max_length)
+# We then define the arguments to pass to the `generate` function. These arguments
+# are passed to the `generate` function of the PPOTrainer, which is a wrapper around
+# the `generate` function of the trained model.
+generation_kwargs = {
+    "min_length": -1,
+    "top_k": 0.0,
+    "top_p": 1.0,
+    "do_sample": True,
+    "pad_token_id": tokenizer.eos_token_id,
+}
+output_min_length = 20
+output_max_length = 30
+output_length_sampler = LengthSampler(output_min_length, output_max_length)
 
 # model_save_path = script_args.model_save_path
 
 for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
     
-    query_tensors_base = batch["input_ids_base"]
-    query_tensors_adapter = batch["input_ids_adapter"]
-    
-    print(f"These are the query_tensors_base: {query_tensors_base} \
-        and these are the query_tensors_adapter: {query_tensors_adapter}")
-    
-    
+    base_query_tensors = batch["input_ids_base"]
+    adapter_query_tensors = batch["input_ids_adapter"]
 
     # Get response from the policy model
-    # response_tensors = []
-    # for query in query_tensors:
-    #     gen_len = output_length_sampler()
-    #     generation_kwargs["max_new_tokens"] = gen_len
-    #     response = ppo_trainer.generate(query, **generation_kwargs)
-    #     response_tensors.append(response.squeeze()[-gen_len:])
+    response_tensors = []
+    for base_query, adapter_query in zip(base_query_tensors, adapter_query_tensors):
+        gen_len = output_length_sampler()
+        generation_kwargs["max_new_tokens"] = gen_len
+        
+        response = ppo_trainer.generate(adapter_query, **generation_kwargs)
+        response_tensors.append(response.squeeze()[-gen_len:])
+        
+        
     # batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
 
     # # Compute sentiment score # noqa

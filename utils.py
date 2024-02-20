@@ -23,8 +23,7 @@ from trl.core import LengthSampler
 def build_dataset(
     config: PPOConfig, 
     dataset_name: Optional[str] = "allenai/real-toxicity-prompts", 
-    base_tokenizer: PreTrainedTokenizerBase = None,
-    adapter_tokenizer: PreTrainedTokenizerBase = None,
+    tokenizer: PreTrainedTokenizerBase = None,
     input_min_text_length: int=5, 
     input_max_text_length: int=10,
     just_train: bool=True,
@@ -43,13 +42,9 @@ def build_dataset(
         dataloader (`torch.utils.data.DataLoader`):
             The dataloader for the dataset.
     """
-    if not base_tokenizer:
-        base_tokenizer = AutoTokenizer.from_pretrained(config.base_model_name)
-        base_tokenizer.pad_token = base_tokenizer.eos_token
-    
-    if not adapter_tokenizer:
-        adapter_tokenizer = AutoTokenizer.from_pretrained(config.adapter_model_name)
-        adapter_tokenizer.pad_token = adapter_tokenizer.eos_token
+    if not tokenizer:
+        tokenizer = AutoTokenizer.from_pretrained(config.adapter_model_name)
+        tokenizer.pad_token = tokenizer.eos_token
 
     ds = load_dataset(dataset_name, split="train")
 
@@ -65,11 +60,8 @@ def build_dataset(
         prompt = sample["prompt"]["text"]
         continuation = sample["continuation"]["text"]
 
-        sample["input_ids_base"] = base_tokenizer.encode(prompt + continuation)[: input_size()]
-        sample["query_base"] = base_tokenizer.decode(sample["input_ids_base"])
-        
-        sample["input_ids_adapter"] = adapter_tokenizer.encode(prompt + continuation)[: input_size()]
-        sample["query_adapter"] = adapter_tokenizer.decode(sample["input_ids_adapter"])     
+        sample["input_ids"] = tokenizer.encode(prompt + continuation)[: input_size()]
+        sample["query"] = tokenizer.decode(sample["input_ids"])  
         
         return sample
 
