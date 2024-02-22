@@ -33,7 +33,7 @@ from trl.core import LengthSampler
 # my stuff
 from utils import build_dataset, collator
 from PPO_adapter import PPOwithAdapterConfig, PPOwithAdapterTrainer
-from product_of_experts import ProductModel, create_reference_model_from_product
+from product_of_experts import PEConfig, PEModel, ProductModel, create_reference_model_from_product
 
 
 tqdm.pandas()
@@ -104,13 +104,14 @@ config = PPOwithAdapterConfig(
 # set seed before initializing value head for deterministic eval
 set_seed(config.seed)
 
-product_model = ProductModel(config.base_model_name, config.adapter_model_name)
+pe_config = PEConfig(config.base_model_name, config.adapter_model_name)
+pe_model = PEModel(pe_config)
+#product_model = ProductModel(config.base_model_name, config.adapter_model_name)
 
-# We create a reference model by sharing 20 layers
-ref_model = create_reference_model_from_product(product_model, num_shared_layers=4)
+# We create a reference model by sharing 20 layeref_model = create_reference_model_from_product(pe_model, num_shared_layers=4)
 
 # We make sure to use `Adam` optimizer on the model parameters that require gradients.
-optimizer = Adam(filter(lambda p: p.requires_grad, product_model.adapter_model.parameters()), lr=config.learning_rate)
+optimizer = Adam(filter(lambda p: p.requires_grad, pe_model.adapter_model.parameters()), lr=config.learning_rate)
 
 # GPT-2 / GPT-J tokenizer has a pad token, but it is not eos_token by default. We need to set it to eos_token.
 # only for this model.
@@ -129,7 +130,7 @@ dataset = build_dataset(config,
 # We then build the PPOTrainer, passing the model, the reference model, the tokenizer
 ppo_trainer = PPOwithAdapterTrainer(
     config,
-    product_model=product_model,
+    product_model=pe_model,
     tokenizer=tokenizer,
     ref_model=ref_model,
     dataset=dataset,
