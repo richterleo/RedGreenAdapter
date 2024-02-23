@@ -113,15 +113,17 @@ class PEModel(PreTrainedModel):
             param.requires_grad = False
         
         # load adapter model
-        self.adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name)
-        self.adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(config.adapter_model_name)
+        self.adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name).to(config.device)
+        self.adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(config.adapter_model_name).to(config.device)
                
         
             
     def forward(self, input_ids, attention_mask=None, **kwargs):
         
-        base_logits = self.b_model(input_ids=input_ids, attention_mask=attention_mask).logits
-        adapter_logits = self.adapter_model(input_ids=input_ids, attention_mask=attention_mask).logits
+        base_logits = self.b_model(input_ids=input_ids, 
+                                   attention_mask=attention_mask)[0] # outputs (lm_logits, loss, value)
+        adapter_logits = self.adapter_model(input_ids=input_ids, 
+                                            attention_mask=attention_mask)[0]
 
         # Element-wise multiplication of the logits
         combined_logits = base_logits * adapter_logits
@@ -202,6 +204,7 @@ if __name__ == "__main__":
     adapter_model_name = "gpt2"
     
     torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(torch_device)
     
     pe_config = PEConfig(base_model_name, adapter_model_name)
     pe_model = PEModel(pe_config)
