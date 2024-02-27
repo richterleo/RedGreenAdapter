@@ -27,13 +27,15 @@ from transformers import (
     RobertaTokenizer,
 )
 
+from transformers.generation.logits_process import LogitsProcessorList
+
 from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer, create_reference_model, set_seed
 from trl.core import LengthSampler
 
 # my stuff
 from utils import build_dataset, collator
 from PPO_adapter import PPOwithAdapterConfig, PPOwithAdapterTrainer
-from product_of_experts import PEConfig, PEModel, ProductModel, create_reference_model_from_product
+from product_of_experts import BaseModelSumLogitsProcessor
 
 
 tqdm.pandas()
@@ -87,12 +89,11 @@ class ScriptArguments:
 parser = HfArgumentParser(ScriptArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
 
-config = PPOwithAdapterConfig(
-    base_model_name=script_args.base_model_name,
-    adapter_model_name=script_args.adapter_model_name,
+config = PPOConfig(
+    model_name=script_args.adapter_model_name,
     learning_rate=script_args.learning_rate,
     log_with=script_args.log_with,
-    ppo_epochs=10, # NOTE: changed this to 10
+    ppo_epochs=10,
     mini_batch_size=script_args.mini_batch_size,
     batch_size=script_args.batch_size,
     gradient_accumulation_steps=script_args.gradient_accumulation_steps,
@@ -104,20 +105,20 @@ config = PPOwithAdapterConfig(
 # set seed before initializing value head for deterministic eval
 set_seed(config.seed)
 
-pe_config = PEConfig(config.base_model_name, config.adapter_model_name)
-pe_model = PEModel(pe_config)
-#product_model = ProductModel(config.base_model_name, config.adapter_model_name)
+model = AutoModelForCausalLM.from_pretrained(config.model_name) # torch_dtype=torch.bfloat16 not available for gpt2
+model = AutoModelForCausalLMWithValueHead.from_pretrained(model)
 
-# We create a reference model by sharing 20 layeref_model = create_reference_model_from_product(pe_model, num_shared_layers=4)
-
-# We make sure to use `Adam` optimizer on the model parameters that require gradients.
-optimizer = Adam(filter(lambda p: p.requires_grad, pe_model.adapter_model.parameters()), lr=config.learning_rate)
+# This serves as reference model as well
+ref_model = AutoModelForCausalLM(script_args.base_model_name)
 
 # GPT-2 / GPT-J tokenizer has a pad token, but it is not eos_token by default. We need to set it to eos_token.
 # only for this model.
 # need to take tokenizer from smaller model #TODO ask if this might be a problem/ there's some better solution
-tokenizer = AutoTokenizer.from_pretrained(config.adapter_model_name)
+tokenizer = AutoTokenizer.from_pretrained(script_args.base_model_name)
 tokenizer.pad_token = tokenizer.eos_token
+
+# We make sure to use `Adam` optimizer on the model parameters that require gradients.
+optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=config.learning_rate)
 
 # We retrieve the dataloader by calling the `build_dataset` function.
 min_input_length = 30
@@ -128,11 +129,11 @@ dataset = build_dataset(config,
                         tokenizer=tokenizer)
 
 # We then build the PPOTrainer, passing the model, the reference model, the tokenizer
-ppo_trainer = PPOwithAdapterTrainer(
+ppo_trainer = PPOTrainer(
     config,
-    product_model=pe_model,
+    model=model,
     tokenizer=tokenizer,
-    ref_model=ref_model,
+    ref_model=ref_model, 
     dataset=dataset,
     data_collator=collator,
     optimizer=optimizer,
@@ -151,12 +152,18 @@ toxicity_model = RobertaForSequenceClassification.from_pretrained(toxicity_model
 # We then define the arguments to pass to the `generate` function. These arguments
 # are passed to the `generate` function of the PPOTrainer, which is a wrapper around
 # the `generate` function of the trained model.
+
+# Define logitsprocessor
+product_logits_processor = BaseModelSumLogitsProcessor(script_args.base_model_name)
+logits_processor_lst = LogitsProcessorList([product_logits_processor])
+
 generation_kwargs = {
     "min_length": -1,
     "top_k": 0.0,
     "top_p": 1.0,
     "do_sample": True,
     "pad_token_id": tokenizer.eos_token_id,
+    "logits_processor": logits_processor_lst
 }
 output_min_length = 20
 output_max_length = 30

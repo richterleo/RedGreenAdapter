@@ -202,7 +202,7 @@ def create_reference_model_from_product(pe_model, num_shared_layers):
     return copied_model
 
 
-class BaseModelLogitsProcessor(LogitsProcessor):
+class BaseModelSumLogitsProcessor(LogitsProcessor):
     
     def __init__(self, 
                  source_model_name, 
@@ -212,7 +212,6 @@ class BaseModelLogitsProcessor(LogitsProcessor):
         super().__init__(*args, **kwargs)
         self.source_model_name = source_model_name
         self.source_model = AutoModelForCausalLM.from_pretrained(source_model_name)
-        self.source_model = AutoModelForCausalLMWithValueHead.from_pretrained(self.source_model)
         self.device = None
         
         
@@ -227,13 +226,12 @@ class BaseModelLogitsProcessor(LogitsProcessor):
         self.source_model.eval() # TODO: is this necessary?
         
         with torch.inference_mode():                           
-            outputs = self.source_model(input_ids=input_ids, return_dict=True)[0] # outputs (lm_logits, loss, value) 
-            bmodel_next_token_logits = outputs[:, -1, :]
+            outputs = self.source_model(input_ids=input_ids, return_dict=True) # outputs (lm_logits, loss, value) 
+            bmodel_next_token_logits = outputs.logits[:, -1, :] # get output for last/next token
                                                 #attention_mask=attention_mask)[0]      
         
         return bmodel_next_token_logits
-         
-        
+                 
         
     
     def __call__(self, 
@@ -263,7 +261,7 @@ if __name__ == "__main__":
     # pe_config = PEConfig(base_model_name, adapter_model_name)
     # pe_model = PEModel(pe_config)
     
-    tokenizer = AutoTokenizer.from_pretrained(adapter_model_name)
+    tokenizer = AutoTokenizer.from_pretrained(base_model_name)
     tokenizer.pad_token = tokenizer.eos_token
     
     inputs = tokenizer('I enjoy walking with my cute dog', return_tensors='pt').to(torch_device)
@@ -276,7 +274,7 @@ if __name__ == "__main__":
     # wrapped_pe_model = PreTrainedModelWrapper(pe_model)
     
     
-    product_logits_processor = BaseModelLogitsProcessor(base_model_name)
+    product_logits_processor = BaseModelSumLogitsProcessor(base_model_name)
     logits_processor_lst = LogitsProcessorList([product_logits_processor])
     
     adapter_model = AutoModelForCausalLM.from_pretrained(adapter_model_name).to(torch_device)
