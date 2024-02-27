@@ -1,4 +1,5 @@
 import torch
+import typing
 
 from copy import deepcopy
 from transformers import (
@@ -7,8 +8,11 @@ from transformers import (
     PreTrainedModel,
     PretrainedConfig,
     AutoModel, 
-    AutoConfig
+    AutoConfig,
+    LogitsProcessor
 )
+
+from transformers.generation.logits_process import LogitsProcessorList
 
 from torch.nn.functional import softmax
 
@@ -198,6 +202,56 @@ def create_reference_model_from_product(pe_model, num_shared_layers):
     return copied_model
 
 
+class BaseModelLogitsProcessor(LogitsProcessor):
+    
+    def __init__(self, 
+                 source_model_name, 
+                 *args, 
+                 **kwargs):
+        
+        super().__init__(*args, **kwargs)
+        self.source_model_name = source_model_name
+        self.source_model = AutoModelForCausalLM.from_pretrained(source_model_name)
+        self.source_model = AutoModelForCausalLMWithValueHead.from_pretrained(self.source_model)
+        self.device = None
+        
+        
+    def _calc_bmodel_next_token_logits(self, 
+                          input_ids,
+                          scores):
+        
+        if not self.device:
+            self.device = input_ids.device
+            self.source_model.to(self.device)
+        
+        self.source_model.eval() # TODO: is this necessary?
+        
+        with torch.inference_mode():                           
+            outputs = self.source_model(input_ids=input_ids, return_dict=True)[0] # outputs (lm_logits, loss, value) 
+            bmodel_next_token_logits = outputs[:, -1, :]
+                                                #attention_mask=attention_mask)[0]      
+        
+        return bmodel_next_token_logits
+         
+        
+        
+    
+    def __call__(self, 
+                 input_ids, 
+                 scores):
+
+        
+        # if self.rng is None:
+        #     self.rng = torch.Generator(device=input_ids.device)
+        
+        return self._calc_bmodel_next_token_logits(input_ids, scores) + scores
+        
+        
+            
+            
+    
+
+
 if __name__ == "__main__":
     
     base_model_name = "gpt2-large"
@@ -206,15 +260,37 @@ if __name__ == "__main__":
     torch_device = "cuda" if torch.cuda.is_available() else "cpu"
     print(torch_device)
     
-    pe_config = PEConfig(base_model_name, adapter_model_name)
-    pe_model = PEModel(pe_config)
+    # pe_config = PEConfig(base_model_name, adapter_model_name)
+    # pe_model = PEModel(pe_config)
     
     tokenizer = AutoTokenizer.from_pretrained(adapter_model_name)
     tokenizer.pad_token = tokenizer.eos_token
     
-    model_inputs = tokenizer('I enjoy walking with my cute dog', return_tensors='pt').to(torch_device)
+    inputs = tokenizer('I enjoy walking with my cute dog', return_tensors='pt').to(torch_device)
 
-    # generate 40 new tokens
-    greedy_output = pe_model.generate(**model_inputs, max_new_tokens=40)
+    # # generate 40 new tokens
+    # greedy_output = pe_model.generate(**inputs, max_new_tokens=40)
     
-    print(greedy_output)
+    # print(greedy_output)
+    
+    # wrapped_pe_model = PreTrainedModelWrapper(pe_model)
+    
+    
+    product_logits_processor = BaseModelLogitsProcessor(base_model_name)
+    logits_processor_lst = LogitsProcessorList([product_logits_processor])
+    
+    adapter_model = AutoModelForCausalLM.from_pretrained(adapter_model_name).to(torch_device)
+    # trl.models.modeling_value_head.AutoModelForCausalLMWithValueHead
+    # adapter_model.pretrained_model gives GPT2LMHeadModel
+    adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(adapter_model_name).to(torch_device)
+    
+    generation_output = adapter_model.generate(**inputs,
+                                    #   return_dict_in_generate=True,
+                                      #output_scores=True,
+                                      logits_processor=logits_processor_lst)
+    
+    print(generation_output)
+    
+    
+    
+    
