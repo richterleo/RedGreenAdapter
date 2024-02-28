@@ -12,7 +12,7 @@ from transformers import (
     LogitsProcessor,
     TopPLogitsWarper,
     LogitNormalization,
-    top_k_top_p_filtering
+    GenerationConfig
 )
 
 from transformers.generation.logits_process import LogitsProcessorList
@@ -138,8 +138,33 @@ def logits_processor_wrapper(adapter_model, *args, top_p = 0.9, logits_warper=No
         return LogitsProcessorList([AdapterModelLogitsProcessor(adapter_model, *args, top_p=top_p, **kwargs)])
     
     
+def get_logits_warper(model, generation_config, *args, adapter_model_top_p = 0.9, **kwargs):
     
+    logits_warper_lst = model._get_logits_warper(generation_config)
+    adapter_model_logits_warper = AdapterModelLogitsProcessor(adapter_model, *args, top_p=adapter_model_top_p, **kwargs)
+    logit_normalizer = LogitNormalization()
     
+    logits_warper_lst.extend([adapter_model_logits_warper, logit_normalizer])
+    
+    return 
+    
+
+def update_get_logits_warper(original_method, adapter_model, adapter_model_top_p):
+    '''
+    Monkey patching the _get_logits_warper method of the base model
+    '''
+    
+    def wrapper(*args, **kwargs):
+        
+        logits_warper_lst = original_method(*args, **kwargs)
+        adapter_model_logits_warper = AdapterModelLogitsProcessor(adapter_model, *args, top_p=adapter_model_top_p, **kwargs)
+        logit_normalizer = LogitNormalization()
+        
+        logits_warper_lst.extend([adapter_model_logits_warper, logit_normalizer])
+        
+        return logits_warper_lst
+    
+    return wrapper
     
     
 
@@ -162,6 +187,7 @@ if __name__ == "__main__":
     # # trl.models.modeling_value_head.AutoModelForCausalLMWithValueHead
     # # adapter_model.pretrained_model gives GPT2LMHeadModel
     adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(adapter_model_name).to(torch_device)
+    adapter_model_top_p = 0.9
     
     
     # -------------------------------------------
@@ -172,18 +198,52 @@ if __name__ == "__main__":
     # when using with (multinomial) sampling based generation strategies, the adaptermodellogitsprocessor must be a warper
     # make sure there is renormalization occuring after
     
+    # Define generation kwargs
+    generation_kwargs = {
+    "min_length": -1,
+    "top_k": 0.0,
+    "top_p": 1.0,
+    "do_sample": True,
+    "pad_token_id": tokenizer.eos_token_id,
+    }
     
-    # VARIANT 1: GREEDY SEARCH 
     logits_processor_lst = logits_processor_wrapper(adapter_model)
-    generation_output = base_model.generate(**inputs,
-                                            renormalize_logits=True,
-                                            logits_processor=logits_processor_lst)
     
-    print(generation_output)
+    mode = 'sample'
+    # VARIANT 1: GREEDY SEARCH 
     
+    
+    if mode == 'greedy':
+        generation_output = base_model.generate(**inputs,
+                                                renormalize_logits=True,
+                                                max_new_tokens=30,
+                                                logits_processor=logits_processor_lst)
+            
     
     # VARIANT 2: SAMPLING 
     
+    # every model has own configuration file for default generate args; GPT2 inherits also from PretrainedConfig
+    # defaults include: do_sample=False, top_p=1, top_k=50, temperature=1.0
+    
+    # TODO: annoyingly, when sampling, the logitsprocessor will come first, before a logitswarper. If we do truncation
+    # like with the top-k / top-p sampling, we'd want to truncate _both_ prob distributions first and then multiply + normalize
+    # easy fix for now: call sample method and give list of logit_warpers. but this is non-ideal bc we just want to be able to use any configuration
+    elif mode == 'sample':
+        
+        
+        original_warp_creator = base_model._get_logits_warper
+        updated_get_logits_warper = update_get_logits_warper(original_warp_creator, adapter_model, adapter_model_top_p)
+        base_model._get_logits_warper = updated_get_logits_warper.__get__(base_model, AutoModelForCausalLM)
+        generation_output = base_model.generate(**inputs, 
+                                                renormalize_logits=True,
+                                                max_new_tokens=30,
+                                                do_sample=True,
+                                                logits_processor=logits_processor_lst)
     # VARIANT 3: BEAMSEARCH
+    elif mode == 'beamsearch':
+        pass
+    
+    
+    print(tokenizer.decode(generation_output[0], skip_special_tokens=True))
     
     
