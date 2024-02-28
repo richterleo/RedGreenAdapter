@@ -29,7 +29,7 @@ from transformers import (
 
 from transformers.generation.logits_process import LogitsProcessorList
 
-from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer, create_reference_model, set_seed
+from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer, create_reference_model, set_seed, PreTrainedModelWrapper
 from trl.core import LengthSampler
 
 # my stuff
@@ -109,7 +109,8 @@ model = AutoModelForCausalLM.from_pretrained(config.model_name) # torch_dtype=to
 model = AutoModelForCausalLMWithValueHead.from_pretrained(model)
 
 # This serves as reference model as well
-ref_model = AutoModelForCausalLM(script_args.base_model_name)
+ref_model = AutoModelForCausalLM.from_pretrained(script_args.base_model_name) # torch_dtype=torch.bfloat16 not available for gpt2
+ref_model = AutoModelForCausalLMWithValueHead.from_pretrained(script_args.base_model_name)
 
 # GPT-2 / GPT-J tokenizer has a pad token, but it is not eos_token by default. We need to set it to eos_token.
 # only for this model.

@@ -9,7 +9,10 @@ from transformers import (
     PretrainedConfig,
     AutoModel, 
     AutoConfig,
-    LogitsProcessor
+    LogitsProcessor,
+    TopPLogitsWarper,
+    LogitNormalization,
+    top_k_top_p_filtering
 )
 
 from transformers.generation.logits_process import LogitsProcessorList
@@ -22,184 +25,6 @@ from trl import (
     PreTrainedModelWrapper
 )
 
-
-class ProductModel(torch.nn.Module):
-    
-    def __init__(self, base_model_name, adapter_model_name):
-        
-        super(ProductModel, self).__init__()
-        # Load base model 
-        # in bfloat16 to save memory using `transformers`.
-        # Problem: for gpt2 based models bfloat16 is not yet supported
-        # adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name, torch_dtype=torch.bfloat16)
-        self.base_model = AutoModelForCausalLM.from_pretrained(base_model_name)
-        self.base_model = AutoModelForCausalLMWithValueHead.from_pretrained(self.base_model)
-        
-        # load adapter model
-        self.adapter_model = AutoModelForCausalLM.from_pretrained(adapter_model_name)
-        self.adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(self.adapter_model)
-        
-        # Base model should stay fixed
-        for param in self.base_model.parameters():
-            param.requires_grad = False
-        
-        # # Ensure both models are in evaluation mode
-        # self.gpt2_large.eval()
-        # self.gpt2_xl.eval()
-
-    def forward(self, input_ids, attention_mask=None):
-        
-        # Get logits from both models
-        base_logits = self.base_model(input_ids=input_ids, attention_mask=attention_mask).logits
-        adapter_logits = self.adapter_model(input_ids=input_ids, attention_mask=attention_mask).logits
-
-        # Element-wise multiplication of the logits
-        combined_logits = base_logits * adapter_logits
-
-        # Apply softmax to get probabilities
-        combined_probs = softmax(combined_logits, dim=-1)
-
-        return combined_probs
-    
-
-    def generate(self, input_ids, max_length=50):
-        self.eval() # Put the model in eval mode
-        generated = input_ids # Initialize generated sequence with input
-
-        with torch.no_grad():
-            for _ in range(max_length):
-                # Predict the next token using the combined model
-                combined_probs = self.forward(input_ids=generated)
-                
-                # Select the last token from the sequence
-                next_token_probs = combined_probs[:, -1, :]
-                
-                # Sample or choose the next token (here we choose the most probable token for simplicity)
-                next_token_id = torch.argmax(next_token_probs, dim=-1, keepdim=True)
-                
-                # Append the predicted token to the generated sequence
-                generated = torch.cat((generated, next_token_id), dim=1)
-                
-                # Check if the last predicted token is the end of sentence token for GPT-2 (50256 for GPT-2 tokenizer)
-                if next_token_id.item() == 50256:
-                    break
-
-        return generated
-
-    
-    @property
-    def __class__(self):
-        return self.adapter_model.__class__
-    
-    
-    
-class PEConfig(PretrainedConfig):
-
-    model_type = 'pe_model'
-    def __init__(self, b_model_name, adapter_model_name, **kwargs):
-        super().__init__(**kwargs)
-        self.b_model_name = b_model_name
-        self.adapter_model_name = adapter_model_name
-
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = kwargs.get('device', device)
-
-class PEModel(PreTrainedModel):
-    
-    def __init__(self, config):
-        super().__init__(config)
-        self.config = config
-        self.b_model = AutoModelForCausalLM.from_pretrained(config.b_model_name).to(config.device)
-        self.b_model = AutoModelForCausalLMWithValueHead.from_pretrained(config.b_model_name).to(config.device)
-        
-        # Base model should stay fixed
-        for param in self.b_model.parameters():
-            param.requires_grad = False
-        
-        # load adapter model
-        self.adapter_model = AutoModelForCausalLM.from_pretrained(config.adapter_model_name).to(config.device)
-        self.adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(config.adapter_model_name).to(config.device)
-               
-        
-            
-    def forward(self, input_ids, attention_mask=None, **kwargs):
-        
-        base_logits = self.b_model(input_ids=input_ids, 
-                                   attention_mask=attention_mask)[0] # outputs (lm_logits, loss, value)
-        adapter_logits = self.adapter_model(input_ids=input_ids, 
-                                            attention_mask=attention_mask)[0]
-
-        # Element-wise multiplication of the logits
-        combined_logits = base_logits * adapter_logits
-
-        # Apply softmax to get probabilities
-        combined_probs = softmax(combined_logits, dim=-1)
-
-        return combined_probs
-    
-    
-    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
-        
-        token_type_ids = kwargs.get("token_type_ids", None)
-        # Omit tokens covered by past_key_values
-        if past_key_values:
-            past_length = past_key_values[0][0].shape[2]
-
-            # Some generation methods already pass only the last input ID
-            if input_ids.shape[1] > past_length:
-                remove_prefix_length = past_length
-            else:
-                # Default to old behavior: keep only final ID
-                remove_prefix_length = input_ids.shape[1] - 1
-
-            input_ids = input_ids[:, remove_prefix_length:]
-            if token_type_ids is not None:
-                token_type_ids = token_type_ids[:, -input_ids.shape[1] :]
-
-        attention_mask = kwargs.get("attention_mask", None)
-        position_ids = kwargs.get("position_ids", None)
-
-        if attention_mask is not None and position_ids is None:
-            # create position_ids on the fly for batch generation
-            position_ids = attention_mask.long().cumsum(-1) - 1
-            position_ids.masked_fill_(attention_mask == 0, 1)
-            if past_key_values:
-                position_ids = position_ids[:, -input_ids.shape[1] :]
-        else:
-            position_ids = None
-
-        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
-            model_inputs = {"inputs_embeds": inputs_embeds}
-        else:
-            model_inputs = {"input_ids": input_ids}
-
-        model_inputs.update(
-            {
-                "past_key_values": past_key_values,
-                "use_cache": kwargs.get("use_cache"),
-                "position_ids": position_ids,
-                "attention_mask": attention_mask,
-                "token_type_ids": token_type_ids,
-            }
-        )
-
-        return model_inputs
-    
-    # @property
-    # def __class__(self):
-    #     return self.adapter_model.__class__
-
-
-        
-    
-    
-def create_reference_model_from_product(pe_model, num_shared_layers):
-    
-    copied_model = deepcopy(pe_model)
-    copied_model.adapter_model = create_reference_model(copied_model.adapter_model, num_shared_layers)
-    
-    return copied_model
 
 
 class BaseModelSumLogitsProcessor(LogitsProcessor):
@@ -246,7 +71,76 @@ class BaseModelSumLogitsProcessor(LogitsProcessor):
         
         
             
-            
+class AdapterModelLogitsProcessor(LogitsProcessor):
+    
+    def __init__(self, 
+                 adapter_model, 
+                 *args,
+                 post_normalize=True,
+                 top_p = 0.9, 
+                 **kwargs):
+        
+        super().__init__(*args, **kwargs)
+        self.adapter_model = adapter_model
+        self.post_normalize = post_normalize
+        self.top_p = top_p
+        self.device = None
+        
+        self.top_p_logits_warper = TopPLogitsWarper(self.top_p)
+        
+        if self.post_normalize:
+            self.logit_normalizer = LogitNormalization()
+            self.logits_processor_lst = LogitsProcessorList([self.logit_normalizer, self.top_p_logits_warper])
+        else:
+            self.logits_processor_lst = LogitsProcessorList([self.top_p_logits_warper])
+        
+        
+    def _calc_next_token_logits(self, 
+                          input_ids,
+                          scores):
+        
+        if not self.device:
+            self.device = input_ids.device
+            self.adapter_model.to(self.device)
+        
+        self.adapter_model.eval() # TODO: is this necessary?
+        
+        with torch.inference_mode():                           
+            outputs = self.adapter_model(input_ids=input_ids, return_dict=True)[0] # outputs (lm_logits, loss, value) 
+            next_token_logits = outputs[:, -1, :] 
+            trunc_logits = self.logits_processor_lst(input_ids, next_token_logits)
+                
+        assert trunc_logits.shape == scores.shape, "Truncated adapter model logits must have same shape as base model logits."
+                
+        return trunc_logits
+                 
+        
+    
+    def __call__(self, 
+                 input_ids, 
+                 scores):
+
+        
+        # if self.rng is None:
+        #     self.rng = torch.Generator(device=input_ids.device)
+        
+        return self._calc_next_token_logits(input_ids, scores) + scores          
+    
+
+def logits_processor_wrapper(adapter_model, *args, top_p = 0.9, logits_warper=None, **kwargs):
+    '''
+    
+    '''
+    if logits_warper:
+        return LogitsProcessorList([logits_warper, AdapterModelLogitsProcessor(adapter_model, *args, top_p=top_p, **kwargs)])
+    
+    else: 
+        return LogitsProcessorList([AdapterModelLogitsProcessor(adapter_model, *args, top_p=top_p, **kwargs)])
+    
+    
+    
+    
+    
     
 
 
@@ -258,37 +152,38 @@ if __name__ == "__main__":
     torch_device = "cuda" if torch.cuda.is_available() else "cpu"
     print(torch_device)
     
-    # pe_config = PEConfig(base_model_name, adapter_model_name)
-    # pe_model = PEModel(pe_config)
     
     tokenizer = AutoTokenizer.from_pretrained(base_model_name)
     tokenizer.pad_token = tokenizer.eos_token
     
     inputs = tokenizer('I enjoy walking with my cute dog', return_tensors='pt').to(torch_device)
-
-    # # generate 40 new tokens
-    # greedy_output = pe_model.generate(**inputs, max_new_tokens=40)
-    
-    # print(greedy_output)
-    
-    # wrapped_pe_model = PreTrainedModelWrapper(pe_model)
-    
-    
-    product_logits_processor = BaseModelSumLogitsProcessor(base_model_name)
-    logits_processor_lst = LogitsProcessorList([product_logits_processor])
     
     adapter_model = AutoModelForCausalLM.from_pretrained(adapter_model_name).to(torch_device)
-    # trl.models.modeling_value_head.AutoModelForCausalLMWithValueHead
-    # adapter_model.pretrained_model gives GPT2LMHeadModel
+    # # trl.models.modeling_value_head.AutoModelForCausalLMWithValueHead
+    # # adapter_model.pretrained_model gives GPT2LMHeadModel
     adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(adapter_model_name).to(torch_device)
     
-    generation_output = adapter_model.generate(**inputs,
-                                    #   return_dict_in_generate=True,
-                                      #output_scores=True,
-                                      logits_processor=logits_processor_lst)
+    
+    # -------------------------------------------
+    
+    base_model = AutoModelForCausalLM.from_pretrained(adapter_model_name).to(torch_device)
+    
+    # when using with non-sampling based generation strategies, the adaptermodellogitsprocessor must be a processor
+    # when using with (multinomial) sampling based generation strategies, the adaptermodellogitsprocessor must be a warper
+    # make sure there is renormalization occuring after
+    
+    
+    # VARIANT 1: GREEDY SEARCH 
+    logits_processor_lst = logits_processor_wrapper(adapter_model)
+    generation_output = base_model.generate(**inputs,
+                                            renormalize_logits=True,
+                                            logits_processor=logits_processor_lst)
     
     print(generation_output)
     
     
+    # VARIANT 2: SAMPLING 
+    
+    # VARIANT 3: BEAMSEARCH
     
     
