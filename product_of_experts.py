@@ -69,7 +69,62 @@ class BaseModelSumLogitsProcessor(LogitsProcessor):
         
         return self._calc_bmodel_next_token_logits(input_ids, scores) + scores
         
+class BaseModelLogitsProcessor(LogitsProcessor):
+    
+    def __init__(self, 
+                 base_model,
+                 *args,
+                 generation_config=None,
+                 **kwargs):
         
+        super().__init__(*args, **kwargs)
+        self.base_model = base_model
+        
+        if generation_config:
+            self.generation_config = generation_config
+        else:
+            self.generation_config = self._get_default_generation_config()
+            
+    def _get_default_generation_config(self):
+        
+        return GenerationConfig(
+            min_length=-1,
+            top_k=0.0,
+            top_p=1.0,
+            do_sample=True,
+            pad_token_id= tokenizer.eos_token_id)
+            
+        
+    def _calc_next_token_logits(self, 
+                          input_ids,
+                          scores):
+        
+        if not self.device:
+            self.device = input_ids.device
+            self.base_model.to(self.device)
+        
+        self.base_model.eval() # TODO: is this necessary?
+        
+        with torch.inference_mode():                           
+            outputs = self.base_model.generate(input_ids=input_ids, 
+                                               generation_config=self.generation_config,
+                                               max_new_tokens=1, # just generate the next token
+                                               return_dict=True)[0] # outputs (lm_logits, loss, value) 
+            
+            next_token_logits = outputs[:, -1, :] 
+                
+        assert next_token_logits.shape == scores.shape, "Truncated adapter model logits must have same shape as base model logits."
+                
+        return next_token_logits
+                 
+        
+    
+    def __call__(self, 
+                 input_ids, 
+                 scores):
+
+        
+        return self._calc_next_token_logits(input_ids, scores) + scores          
             
 class AdapterModelLogitsProcessor(LogitsProcessor):
     
@@ -189,61 +244,62 @@ if __name__ == "__main__":
     # # adapter_model.pretrained_model gives GPT2LMHeadModel
     adapter_model = AutoModelForCausalLMWithValueHead.from_pretrained(adapter_model_name).to(torch_device)
     adapter_model_top_p = 0.9
+    base_model = AutoModelForCausalLM.from_pretrained(adapter_model_name).to(torch_device)
     
+    base_model_config = GenerationConfig()
     
     # -------------------------------------------
     
-    base_model = AutoModelForCausalLM.from_pretrained(adapter_model_name).to(torch_device)
     
-    # when using with non-sampling based generation strategies, the adaptermodellogitsprocessor must be a processor
-    # when using with (multinomial) sampling based generation strategies, the adaptermodellogitsprocessor must be a warper
-    # make sure there is renormalization occuring after
+    # # when using with non-sampling based generation strategies, the adaptermodellogitsprocessor must be a processor
+    # # when using with (multinomial) sampling based generation strategies, the adaptermodellogitsprocessor must be a warper
+    # # make sure there is renormalization occuring after
     
-    # Define generation kwargs
-    generation_kwargs = {
-    "min_length": -1,
-    "top_k": 0.0,
-    "top_p": 1.0,
-    "do_sample": True,
-    "pad_token_id": tokenizer.eos_token_id,
-    }
+    # # Define generation kwargs
+    # generation_kwargs = {
+    # "min_length": -1,
+    # "top_k": 0.0,
+    # "top_p": 1.0,
+    # "do_sample": True,
+    # "pad_token_id": tokenizer.eos_token_id,
+    # }
     
-    logits_processor_lst = logits_processor_wrapper(adapter_model)
+    # logits_processor_lst = logits_processor_wrapper(adapter_model)
     
-    mode = 'sample'
-    # VARIANT 1: GREEDY SEARCH 
+    # mode = 'sample'
+    # # VARIANT 1: GREEDY SEARCH 
     
     
-    if mode == 'greedy':
-        generation_output = base_model.generate(**inputs,
-                                                renormalize_logits=True,
-                                                max_new_tokens=30,
-                                                logits_processor=logits_processor_lst)
+    # if mode == 'greedy':
+    #     generation_output = base_model.generate(**inputs,
+    #                                             renormalize_logits=True,
+    #                                             max_new_tokens=30,
+    #                                             logits_processor=logits_processor_lst)
             
     
-    # VARIANT 2: SAMPLING 
+    # # VARIANT 2: SAMPLING 
     
-    # every model has own configuration file for default generate args; GPT2 inherits also from PretrainedConfig
-    # defaults include: do_sample=False, top_p=1, top_k=50, temperature=1.0
+    # # every model has own configuration file for default generate args; GPT2 inherits also from PretrainedConfig
+    # # defaults include: do_sample=False, top_p=1, top_k=50, temperature=1.0
     
-    # TODO: annoyingly, when sampling, the logitsprocessor will come first, before a logitswarper. If we do truncation
-    # like with the top-k / top-p sampling, we'd want to truncate _both_ prob distributions first and then multiply + normalize
-    # easy fix for now: call sample method and give list of logit_warpers. but this is non-ideal bc we just want to be able to use any configuration
-    elif mode == 'sample':
+    # # TODO: annoyingly, when sampling, the logitsprocessor will come first, before a logitswarper. If we do truncation
+    # # like with the top-k / top-p sampling, we'd want to truncate _both_ prob distributions first and then multiply + normalize
+    # # easy fix for now: call sample method and give list of logit_warpers. but this is non-ideal bc we just want to be able to use any configuration
+    # elif mode == 'sample':
         
         
-        original_warp_creator = base_model._get_logits_warper
-        updated_get_logits_warper = update_get_logits_warper(original_warp_creator, adapter_model, adapter_model_top_p)
-        base_model._get_logits_warper = updated_get_logits_warper.__get__(base_model, AutoModelForCausalLM)
-        generation_output = base_model.generate(**inputs, 
-                                                renormalize_logits=True,
-                                                max_new_tokens=30,
-                                                do_sample=True)
-    # VARIANT 3: BEAMSEARCH
-    elif mode == 'beamsearch':
-        pass
+    #     original_warp_creator = base_model._get_logits_warper
+    #     updated_get_logits_warper = update_get_logits_warper(original_warp_creator, adapter_model, adapter_model_top_p)
+    #     base_model._get_logits_warper = updated_get_logits_warper.__get__(base_model, AutoModelForCausalLM)
+    #     generation_output = base_model.generate(**inputs, 
+    #                                             renormalize_logits=True,
+    #                                             max_new_tokens=30,
+    #                                             do_sample=True)
+    # # VARIANT 3: BEAMSEARCH
+    # elif mode == 'beamsearch':
+    #     pass
     
     
-    print(tokenizer.decode(generation_output[0], skip_special_tokens=True))
+    # print(tokenizer.decode(generation_output[0], skip_special_tokens=True))
     
     

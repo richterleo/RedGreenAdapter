@@ -104,7 +104,8 @@ model = AutoModelForCausalLMWithValueHead.from_pretrained(model)
 # This serves as reference model as well
 # Hope there are no problems with 
 base_model = AutoModelForCausalLM.from_pretrained(script_args.base_model_name) # torch_dtype=torch.bfloat16 not available for gpt2
-ref_model = AutoModelForCausalLMWithValueHead.from_pretrained(deepcopy(base_model))
+base_model = AutoModelForCausalLMWithValueHead.from_pretrained(base_model)
+ref_model = deepcopy(base_model)
 
 # GPT-2 / GPT-J tokenizer has a pad token, but it is not eos_token by default. We need to set it to eos_token.
 # only for this model.
@@ -194,7 +195,7 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
             updated_get_logits_warper = update_get_logits_warper(original_warp_creator, model, script_args.adapter_model_top_p)
             base_model._get_logits_warper = updated_get_logits_warper.__get__(base_model, AutoModelForCausalLM)
             #response = base_model.generate(query, **generation_kwargs)
-            response = response = sample_ppo_trainer.generate(query, **generation_kwargs)
+            response = sample_ppo_trainer.generate(query, **generation_kwargs)
             response_tensors.append(response.squeeze()[-gen_len:])
         
         batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
