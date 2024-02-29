@@ -25,6 +25,7 @@ from transformers import (
     HfArgumentParser,
     RobertaForSequenceClassification,
     RobertaTokenizer,
+    GenerationConfig
 )
 
 from transformers.generation.logits_process import LogitsProcessorList

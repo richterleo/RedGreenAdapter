@@ -154,10 +154,10 @@ def update_get_logits_warper(original_method, adapter_model, adapter_model_top_p
     Monkey patching the _get_logits_warper method of the base model
     '''
     
-    def wrapper(*args, **kwargs):
+    def wrapper(self, generation_config):
         
-        logits_warper_lst = original_method(*args, **kwargs)
-        adapter_model_logits_warper = AdapterModelLogitsProcessor(adapter_model, *args, top_p=adapter_model_top_p, **kwargs)
+        logits_warper_lst = original_method(generation_config)
+        adapter_model_logits_warper = AdapterModelLogitsProcessor(adapter_model, top_p=adapter_model_top_p)
         logit_normalizer = LogitNormalization()
         
         logits_warper_lst.extend([adapter_model_logits_warper, logit_normalizer])
@@ -237,8 +237,7 @@ if __name__ == "__main__":
         generation_output = base_model.generate(**inputs, 
                                                 renormalize_logits=True,
                                                 max_new_tokens=30,
-                                                do_sample=True,
-                                                logits_processor=logits_processor_lst)
+                                                do_sample=True)
     # VARIANT 3: BEAMSEARCH
     elif mode == 'beamsearch':
         pass
