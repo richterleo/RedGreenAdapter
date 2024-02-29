@@ -12,6 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -30,40 +32,27 @@ from transformers import (
 
 from transformers.generation.logits_process import LogitsProcessorList
 
-from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer, create_reference_model, set_seed, PreTrainedModelWrapper
+from trl import (AutoModelForCausalLMWithValueHead, 
+                 PPOConfig, 
+                 PPOTrainer, 
+                 create_reference_model, 
+                 set_seed, 
+                 PreTrainedModelWrapper)
+
 from trl.core import LengthSampler
 
 # my stuff
 from utils import build_dataset, collator
 from PPO_adapter import PPOwithAdapterConfig, PPOwithAdapterTrainer
-from product_of_experts import BaseModelSumLogitsProcessor
+from product_of_experts import (BaseModelSumLogitsProcessor, 
+                    AdapterModelLogitsProcessor, 
+                    logits_processor_wrapper, 
+                    update_get_logits_warper)
 
 
 tqdm.pandas()
 
-########################################################################
-# This is a fully working simple example to use trl with accelerate.
-#
-# This example fine-tunes a GPTJ model to generate less toxic contents
-# by using allenai/real-toxicity-prompts dataset. We use PPO
-#  (proximal policy optimization) to optimize the model.
-# in any of the following settings (with the same script):
-#   - single CPU or single GPU
-#   - multi GPUS (using PyTorch distributed mode)
-#   - multi GPUS (using DeepSpeed ZeRO-Offload stages 1 & 2)
-#   - fp16 (mixed-precision) or fp32 (normal precision)
-#
-# To run it in each of these various modes, first initialize the accelerate
-# configuration with `accelerate config`
-#
-########################################################################
 
-
-# We first define the configuration of the experiment, defining the model, the dataset,
-# the training parameters, and the PPO parameters.
-# Check the default arguments in the `PPOConfig` class for more details.
-# If you want to log with tensorboard, add the kwarg
-# `project_kwargs={"logging_dir": PATH_TO_LOGS}` to the PPOConfig.
 @dataclass
 class ScriptArguments:
     """
@@ -78,6 +67,7 @@ class ScriptArguments:
     learning_rate: Optional[float] = field(default=(1.47e-5) * 2, metadata={"help": "the learning rate"})
     mini_batch_size: Optional[int] = field(default=4, metadata={"help": "the PPO minibatch size"})
     batch_size: Optional[int] = field(default=16, metadata={"help": "the batch size"})
+    adapter_model_top_p: Optional[float] = field(default=0.9, metadata={"help": "the top-p value for thresholded adapter"})
     gradient_accumulation_steps: Optional[int] = field(
         default=1, metadata={"help": "the number of gradient accumulation steps"}
     )
@@ -90,7 +80,7 @@ class ScriptArguments:
 parser = HfArgumentParser(ScriptArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
 
-config = PPOConfig(
+ppo_config = PPOConfig(
     model_name=script_args.adapter_model_name,
     learning_rate=script_args.learning_rate,
     log_with=script_args.log_with,
@@ -101,17 +91,20 @@ config = PPOConfig(
     remove_unused_columns=False
 )
 
+ppo_sample_config = deepcopy(ppo_config)
+ppo_sample_config.model_name = script_args.base_model_name
 
 
 # set seed before initializing value head for deterministic eval
-set_seed(config.seed)
+set_seed(ppo_config.seed)
 
-model = AutoModelForCausalLM.from_pretrained(config.model_name) # torch_dtype=torch.bfloat16 not available for gpt2
+model = AutoModelForCausalLM.from_pretrained(ppo_config.model_name) # torch_dtype=torch.bfloat16 not available for gpt2
 model = AutoModelForCausalLMWithValueHead.from_pretrained(model)
 
 # This serves as reference model as well
-ref_model = AutoModelForCausalLM.from_pretrained(script_args.base_model_name) # torch_dtype=torch.bfloat16 not available for gpt2
-ref_model = AutoModelForCausalLMWithValueHead.from_pretrained(script_args.base_model_name)
+# Hope there are no problems with 
+base_model = AutoModelForCausalLM.from_pretrained(script_args.base_model_name) # torch_dtype=torch.bfloat16 not available for gpt2
+ref_model = AutoModelForCausalLMWithValueHead.from_pretrained(deepcopy(base_model))
 
 # GPT-2 / GPT-J tokenizer has a pad token, but it is not eos_token by default. We need to set it to eos_token.
 # only for this model.
@@ -120,20 +113,31 @@ tokenizer = AutoTokenizer.from_pretrained(script_args.base_model_name)
 tokenizer.pad_token = tokenizer.eos_token
 
 # We make sure to use `Adam` optimizer on the model parameters that require gradients.
-optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=config.learning_rate)
+optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=ppo_config.learning_rate)
 
 # We retrieve the dataloader by calling the `build_dataset` function.
 min_input_length = 30
 max_input_length = 40
-dataset = build_dataset(config, 
+dataset = build_dataset(ppo_config, 
                         input_min_text_length=min_input_length, 
                         input_max_text_length=max_input_length,
                         tokenizer=tokenizer)
 
 # We then build the PPOTrainer, passing the model, the reference model, the tokenizer
 ppo_trainer = PPOTrainer(
-    config,
+    ppo_config,
     model=model,
+    tokenizer=tokenizer,
+    ref_model=ref_model, 
+    dataset=dataset,
+    data_collator=collator,
+    optimizer=optimizer,
+)
+
+# Create a second PPOTrainer that we use solely for generating samples during the rollout phase of PPO
+sample_ppo_trainer = PPOTrainer(
+    ppo_sample_config,
+    model=base_model,
     tokenizer=tokenizer,
     ref_model=ref_model, 
     dataset=dataset,
@@ -162,11 +166,10 @@ logits_processor_lst = LogitsProcessorList([product_logits_processor])
 generation_kwargs = {
     "min_length": -1,
     "top_k": 0.0,
-    "top_p": 1.0,
+    "top_p": 0.95,
     "do_sample": True,
     "pad_token_id": tokenizer.eos_token_id,
-    "logits_processor": logits_processor_lst
-}
+    "renormalize_logits": True}
 output_min_length = 20
 output_max_length = 30
 output_length_sampler = LengthSampler(output_min_length, output_max_length)
@@ -183,8 +186,18 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
         gen_len = output_length_sampler()
         generation_kwargs["max_new_tokens"] = gen_len
         
-        response = ppo_trainer.generate(query, **generation_kwargs)
-        response_tensors.append(response.squeeze()[-gen_len:])
+        # for generation, we don't keep gradients, so we don't necessarily need the ppo_trainer 
+        # We will just generate as we would normally
+        # that means, the base_model is the actual "base", the adapter only features in the logitsprocessor 
+        if generation_kwargs['do_sample']:
+            original_warp_creator = base_model._get_logits_warper
+            updated_get_logits_warper = update_get_logits_warper(original_warp_creator, model, script_args.adapter_model_top_p)
+            base_model._get_logits_warper = updated_get_logits_warper.__get__(base_model, AutoModelForCausalLM)
+            #response = base_model.generate(query, **generation_kwargs)
+            response = response = sample_ppo_trainer.generate(query, **generation_kwargs)
+            response_tensors.append(response.squeeze()[-gen_len:])
+        
+        batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
         
         
     # batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
