@@ -198,27 +198,25 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
             response = sample_ppo_trainer.generate(query, **generation_kwargs)
             response_tensors.append(response.squeeze()[-gen_len:])
         
-        batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
-        
-        
-    # batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
+    batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
+    
+    
+    # Compute sentiment score # noqa
+    texts = batch["response"]
+    toxicity_inputs = toxicity_tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(
+        ppo_trainer.accelerator.device
+    )
+    logits = toxicity_model(**toxicity_inputs).logits.float()
+    toxicity_labels = (logits[:, 0]).tolist()
 
-    # # Compute sentiment score # noqa
-    # texts = batch["response"]
-    # toxicity_inputs = toxicity_tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(
-    #     ppo_trainer.accelerator.device
-    # )
-    # logits = toxicity_model(**toxicity_inputs).logits.float()
-    # toxicity_labels = (logits[:, 0]).tolist()
+    rewards = [torch.tensor(output) for output in toxicity_labels]
 
-    # rewards = [torch.tensor(output) for output in toxicity_labels]
+    # Run PPO step
+    stats = ppo_trainer.step(query_tensors, response_tensors, rewards)
+    ppo_trainer.log_stats(stats, batch, rewards)
 
-    # # Run PPO step
-    # stats = ppo_trainer.step(query_tensors, response_tensors, rewards)
-    # ppo_trainer.log_stats(stats, batch, rewards)
-
-    # # Save model every 100 epochs
-    # if epoch % 100 == 0:
-    #     if ppo_trainer.accelerator.is_main_process:
-    #         ppo_trainer.save_pretrained(model_save_path)
+    # Save model every 100 epochs
+    if epoch % 100 == 0:
+        if ppo_trainer.accelerator.is_main_process:
+            ppo_trainer.save_pretrained(script_args.model_save_path)
 
