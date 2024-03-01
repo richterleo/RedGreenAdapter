@@ -191,9 +191,9 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
         # We will just generate as we would normally
         # that means, the base_model is the actual "base", the adapter only features in the logitsprocessor 
         if generation_kwargs['do_sample']:
-            original_warp_creator = base_model._get_logits_warper
-            updated_get_logits_warper = update_get_logits_warper(original_warp_creator, model, script_args.adapter_model_top_p)
-            base_model._get_logits_warper = updated_get_logits_warper.__get__(base_model, AutoModelForCausalLM)
+            original_warp_creator = base_model.pretrained_model._get_logits_warper
+            updated_get_logits_warper = update_get_logits_warper(original_warp_creator, model)
+            base_model.pretrained_model._get_logits_warper = updated_get_logits_warper.__get__(base_model.pretrained_model, base_model.pretrained_model.__class__)
             #response = base_model.generate(query, **generation_kwargs)
             response = sample_ppo_trainer.generate(query, **generation_kwargs)
             response_tensors.append(response.squeeze()[-gen_len:])
