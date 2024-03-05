@@ -124,17 +124,8 @@ dataset = build_dataset(ppo_config,
                         input_max_text_length=max_input_length,
                         tokenizer=tokenizer)
 
-# We then build the PPOTrainer, passing the model, the reference model, the tokenizer
-ppo_trainer = PPOTrainer(
-    ppo_config,
-    model=model,
-    tokenizer=tokenizer,
-    ref_model=ref_model, 
-    dataset=dataset,
-    data_collator=collator,
-    optimizer=optimizer,
-)
 
+# Create PPOTrainer
 ppo_trainer_for_products = PPOTrainerForProducts(
     ppo_config,
     model=model,
@@ -163,26 +154,20 @@ toxicity_model_id = "facebook/roberta-hate-speech-dynabench-r4-target"
 toxicity_tokenizer = RobertaTokenizer.from_pretrained(toxicity_model_id)
 # We load the toxicity model in fp16 to save memory.
 toxicity_model = RobertaForSequenceClassification.from_pretrained(toxicity_model_id, torch_dtype=torch.float16).to(
-    ppo_trainer.accelerator.device
+    ppo_trainer_for_products.accelerator.device
 )
 
 
 # We then define the arguments to pass to the `generate` function. These arguments
 # are passed to the `generate` function of the PPOTrainer, which is a wrapper around
 # the `generate` function of the trained model.
-
-# Define logitsprocessor
-product_logits_processor = BaseModelSumLogitsProcessor(script_args.base_model_name)
-logits_processor_lst = LogitsProcessorList([product_logits_processor])
-
 generation_kwargs = {
     "min_length": -1,
     "top_k": 0.0,
     "top_p": 0.95,
     "do_sample": True,
     "pad_token_id": tokenizer.eos_token_id,
-    "renormalize_logits": True,
-    "generate_ref_response":True}
+    "renormalize_logits": True}
 
 output_min_length = 20
 output_max_length = 30
@@ -210,23 +195,15 @@ for epoch, batch in tqdm(enumerate(ppo_trainer_for_products.dataloader)):
             base_model.pretrained_model._get_logits_warper = updated_get_logits_warper.__get__(base_model.pretrained_model, base_model.pretrained_model.__class__)
             
             # Need to save ref_response for KL divergence 
-            response, ref_response = sample_ppo_trainer.generate(query, **generation_kwargs)
-            
-            # We want to keep query (=prompt) and generation separate
-            # TODO: check if we could also just use a flag for this? 
-            # response_tensors.append(response.squeeze()[-gen_len:]) # we want to keep the prompt I think? Why get rid of it?
-            # ref_response_tensors.append(ref_response.squeeze()[-gen_len:])
-            
+            response = sample_ppo_trainer.generate(query, **generation_kwargs)
             
             # validate response tensors
-            if response is None or ref_response is None:
+            if response is None:
                 empty_response_counter += 1
                 print(f"Empty response {empty_response_counter}")
                 
             
-            response_tensors.append(response.squeeze()[-gen_len:]) # The prompt is saved separately
-            ref_response_tensors.append(ref_response.squeeze()[-gen_len:]) # TODO: I think we probably don't need these
-            
+            response_tensors.append(response.squeeze()[-gen_len:]) # The prompt is saved separately            
             
         
     batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
