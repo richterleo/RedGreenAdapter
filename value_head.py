@@ -3,11 +3,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import torch
+import torch.nn as nn
+
 from datasets import load_dataset
 from torch.optim import Adam
 from tqdm import tqdm
 from transformers import (
     AutoModelForCausalLM,
+    ValueHead,
     AutoTokenizer,
     HfArgumentParser,
     RobertaForSequenceClassification,
@@ -39,61 +42,76 @@ from product_of_experts import (BaseModelSumLogitsProcessor,
 class ProductAutoModelForCausalLMWithValueHead(AutoModelForCausalLMWithValueHead):
     
     def __init__(self,
-                 pretrained_model,
-                 source_model,
+                 adapter_model,
+                 basis_model,
                  **kwargs):
         
-        super().__init__(pretrained_model, **kwargs)
+        super().__init__(adapter_model, **kwargs)
+        
+        self.basis_model = basis_model
+        v_head_kwargs, _, _ = self._split_kwargs(kwargs)
+        
+        if not any(hasattr(self.basis_model, attribute) for attribute in self.lm_head_namings):
+            raise ValueError("The model does not have a language model head, please use a model that has one.")
+        
+        self.v_head = self._get_head_for_concatenated_models(v_head_kwargs)
+        
+        self._init_weights(**v_head_kwargs)
+        
+    
+    def _get_head_for_concatenated_models(self, v_head_kwargs):
+        
+        return ProductValueHead(self.adapter_model.config, self.basis_model.config, **v_head_kwargs)
+    
         
         
-    def forward(
-        self,
-        input_ids=None,
-        past_key_values=None,
-        attention_mask=None,
-        **kwargs,
-    ):
-        r"""
-        Applies a forward pass to the wrapped model and returns the logits of the value head.
+    
+class ProductValueHead(ValueHead):
+    
+    def __init__(self,
+                 adapter_config,
+                 basis_config,
+                 **kwargs):
+        
+    
+        super().__init__(adapter_config, **kwargs)
+        
+        # get size of hidden layer for basis_model to concatenate
+        if hasattr(basis_config, "hidden_size"):
+            hidden_size = basis_config.hidden_size
+        if hasattr(basis_config, "word_embed_proj_dim"):
+            hidden_size = basis_config.word_embed_proj_dim
+        elif hasattr(basis_config, "is_encoder_decoder"):
+            if basis_config.is_encoder_decoder and hasattr(basis_config, "decoder"):
+                if hasattr(basis_config.decoder, "hidden_size"):
+                    hidden_size = basis_config.decoder.hidden_size
 
-        Args:
-            input_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`):
-                Indices of input sequence tokens in the vocabulary.
-            past_key_values (`tuple(tuple(torch.FloatTensor))`, `optional`):
-                Contains pre-computed hidden-states (key and values in the attention blocks) as computed by the model
-                (see `past_key_values` input) to speed up sequential decoding.
-            attention_mask (`torch.FloatTensor` of shape `(batch_size, sequence_length)`, `optional`):
-                Mask to avoid performing attention on padding token indices. Mask values selected in ``[0, 1]``:
-                - 1 for tokens that are **not masked**,
-                - 0 for tokens that are **masked**.
-            kwargs (`dict`, `optional`):
-                Additional keyword arguments, that are passed to the wrapped model.
-        """
-        kwargs["output_hidden_states"] = True  # this had already been set in the LORA / PEFT examples
-        kwargs["past_key_values"] = past_key_values
+       
+        self.summary = nn.Linear(hidden_size + self.summary.in_features, 1)
 
-        if self.is_peft_model and self.pretrained_model.active_peft_config.peft_type == "PREFIX_TUNING":
-            kwargs.pop("past_key_values")
-
-        base_model_output = self.pretrained_model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            **kwargs,
-        )
-
-        last_hidden_state = base_model_output.hidden_states[-1]
-        lm_logits = base_model_output.logits
-        loss = base_model_output.loss
-
-        if last_hidden_state.device != self.v_head.summary.weight.device:
-            last_hidden_state = last_hidden_state.to(self.v_head.summary.weight.device)
-
-        value = self.v_head(last_hidden_state).squeeze(-1)
-
-        # force upcast in fp32 if logits are in half-precision
-        if lm_logits.dtype != torch.float32:
-            lm_logits = lm_logits.float()
-
-        return (lm_logits, loss, value)  
+        self.flatten = nn.Flatten()
+        
+        
+    def forward(self, hidden_states):
+        
+        output = self.dropout(hidden_states)
+        
+        if output.dtype != self.summary.weight.dtype:
+            output = output.to(self.summary.weight.dtype)
+            
+        
+        try:
+            output = self.summary(output)
+        
+        except RuntimeError:
+            # TODO: make this less hacky
+            # Currently, we're just concatenating this with a zeros tensor, so it doesn't throw an error if the input is too small
+            zeros_tensor = torch.zeros(output.shape[0], self.summary.in_features-output.shape[1])
+            concatenated_output = torch.cat((output, zeros_tensor), dim=1)
+            output = self.summary(concatenated_output)
+            
+        return output
+        
+    
     
     
