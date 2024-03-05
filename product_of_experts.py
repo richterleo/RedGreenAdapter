@@ -232,7 +232,6 @@ class AdapterModelLogitsProcessor(LogitsProcessor):
         
         if not self.device:
             self.device = input_ids.device
-            print(f"This is the device that the inputs are on: {input_ids.device}")
             self.adapter_model.to(self.device)
         
         self.adapter_model.eval() # TODO: is this necessary?

@@ -43,7 +43,7 @@ from trl.core import LengthSampler
 
 # my stuff
 from utils import build_dataset, collator
-from PPO_adapter import PPOwithAdapterConfig, PPOwithAdapterTrainer
+from PPO_adapter import PPOTrainerForProducts
 from product_of_experts import (BaseModelSumLogitsProcessor, 
                     AdapterModelLogitsProcessor, 
                     logits_processor_wrapper, 
@@ -84,7 +84,7 @@ ppo_config = PPOConfig(
     model_name=script_args.adapter_model_name,
     learning_rate=script_args.learning_rate,
     log_with=script_args.log_with,
-    ppo_epochs=10,
+    ppo_epochs=1, # Originally 100
     mini_batch_size=script_args.mini_batch_size,
     batch_size=script_args.batch_size,
     gradient_accumulation_steps=script_args.gradient_accumulation_steps,
@@ -135,6 +135,17 @@ ppo_trainer = PPOTrainer(
     optimizer=optimizer,
 )
 
+ppo_trainer_for_products = PPOTrainerForProducts(
+    ppo_config,
+    model=model,
+    source_model=base_model,
+    tokenizer=tokenizer,
+    ref_model=ref_model,
+    dataset=dataset,
+    data_collator=collator,
+    optimizer=optimizer
+)
+
 # Create a second PPOTrainer that we use solely for generating samples during the rollout phase of PPO
 sample_ppo_trainer = PPOTrainer(
     ppo_sample_config,
@@ -170,41 +181,62 @@ generation_kwargs = {
     "top_p": 0.95,
     "do_sample": True,
     "pad_token_id": tokenizer.eos_token_id,
-    "renormalize_logits": True}
+    "renormalize_logits": True,
+    "generate_ref_response":True}
+
 output_min_length = 20
 output_max_length = 30
 output_length_sampler = LengthSampler(output_min_length, output_max_length)
 
 # model_save_path = script_args.model_save_path
 
-for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
+for epoch, batch in tqdm(enumerate(ppo_trainer_for_products.dataloader)):
     
     query_tensors = batch["input_ids"]
 
+    empty_response_counter = 0
+    
     # Get response from the policy model
     response_tensors = []
+    ref_response_tensors = []
     for query in query_tensors:
         gen_len = output_length_sampler()
-        generation_kwargs["max_new_tokens"] = gen_len
+        generation_kwargs["max_new_tokens"] = gen_len # I'm not sure what's behind this?
         
         # for generation, we don't keep gradients, so we don't necessarily need the ppo_trainer 
-        # We will just generate as we would normally
-        # that means, the base_model is the actual "base", the adapter only features in the logitsprocessor 
         if generation_kwargs['do_sample']:
             original_warp_creator = base_model.pretrained_model._get_logits_warper
             updated_get_logits_warper = update_get_logits_warper(original_warp_creator, model)
             base_model.pretrained_model._get_logits_warper = updated_get_logits_warper.__get__(base_model.pretrained_model, base_model.pretrained_model.__class__)
-            #response = base_model.generate(query, **generation_kwargs)
-            response = sample_ppo_trainer.generate(query, **generation_kwargs)
-            response_tensors.append(response.squeeze()[-gen_len:])
+            
+            # Need to save ref_response for KL divergence 
+            response, ref_response = sample_ppo_trainer.generate(query, **generation_kwargs)
+            
+            # We want to keep query (=prompt) and generation separate
+            # TODO: check if we could also just use a flag for this? 
+            # response_tensors.append(response.squeeze()[-gen_len:]) # we want to keep the prompt I think? Why get rid of it?
+            # ref_response_tensors.append(ref_response.squeeze()[-gen_len:])
+            
+            
+            # validate response tensors
+            if response is None or ref_response is None:
+                empty_response_counter += 1
+                print(f"Empty response {empty_response_counter}")
+                
+            
+            response_tensors.append(response.squeeze()[-gen_len:]) # The prompt is saved separately
+            ref_response_tensors.append(ref_response.squeeze()[-gen_len:]) # TODO: I think we probably don't need these
+            
+            
         
     batch["response"] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
+    batch["ref_response"] = [tokenizer.decode(r.squeeze()) for r in ref_response_tensors]
     
     
-    # Compute sentiment score # noqa
+    # Compute sentiment score 
     texts = batch["response"]
     toxicity_inputs = toxicity_tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(
-        ppo_trainer.accelerator.device
+        ppo_trainer_for_products.accelerator.device
     )
     logits = toxicity_model(**toxicity_inputs).logits.float()
     toxicity_labels = (logits[:, 0]).tolist()
@@ -212,11 +244,11 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
     rewards = [torch.tensor(output) for output in toxicity_labels]
 
     # Run PPO step
-    stats = ppo_trainer.step(query_tensors, response_tensors, rewards)
-    ppo_trainer.log_stats(stats, batch, rewards)
+    stats = ppo_trainer_for_products.step(query_tensors, response_tensors, rewards)
+    ppo_trainer_for_products.log_stats(stats, batch, rewards)
 
     # Save model every 100 epochs
-    if epoch % 100 == 0:
-        if ppo_trainer.accelerator.is_main_process:
-            ppo_trainer.save_pretrained(script_args.model_save_path)
+    if epoch % 1 == 0:
+        if ppo_trainer_for_products.accelerator.is_main_process:
+            ppo_trainer_for_products.save_pretrained(script_args.model_save_path)
 
