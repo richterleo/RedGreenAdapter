@@ -13,14 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import torch
+import wandb
+
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Optional
-
-import torch
-from datasets import load_dataset
 from torch.optim import Adam
 from tqdm import tqdm
+from typing import Optional
+
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -35,9 +36,7 @@ from transformers.generation.logits_process import LogitsProcessorList
 from trl import (AutoModelForCausalLMWithValueHead, 
                  PPOConfig, 
                  PPOTrainer, 
-                 create_reference_model, 
-                 set_seed, 
-                 PreTrainedModelWrapper)
+                 set_seed)
 
 from trl.core import LengthSampler
 
@@ -83,8 +82,8 @@ script_args = parser.parse_args_into_dataclasses()[0]
 ppo_config = PPOConfig(
     model_name=script_args.adapter_model_name,
     learning_rate=script_args.learning_rate,
-    log_with=script_args.log_with,
-    ppo_epochs=1, # Originally 100
+    log_with='wandb', #script_args.log_with,
+    ppo_epochs=3, # Originally 100
     mini_batch_size=script_args.mini_batch_size,
     batch_size=script_args.batch_size,
     gradient_accumulation_steps=script_args.gradient_accumulation_steps,
