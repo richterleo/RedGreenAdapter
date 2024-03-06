@@ -5,53 +5,37 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from datasets import load_dataset
-from torch.optim import Adam
-from tqdm import tqdm
-from transformers import (
-    AutoModelForCausalLM,
-    ValueHead,
-    AutoTokenizer,
-    HfArgumentParser,
-    RobertaForSequenceClassification,
-    RobertaTokenizer,
-    GenerationConfig
-)
 
-from transformers.generation.logits_process import LogitsProcessorList
-
-from trl import (AutoModelForCausalLMWithValueHead, 
-                 PPOConfig, 
-                 PPOTrainer, 
-                 create_reference_model, 
-                 set_seed, 
-                 PreTrainedModelWrapper)
-
-from trl.core import LengthSampler
-
-# my stuff
-from utils import build_dataset, collator
-from PPO_adapter import PPOwithAdapterConfig, PPOwithAdapterTrainer
-from product_of_experts import (BaseModelSumLogitsProcessor, 
-                    AdapterModelLogitsProcessor, 
-                    logits_processor_wrapper, 
-                    update_get_logits_warper)
-
+from trl import AutoModelForCausalLMWithValueHead
 
 
 class ProductAutoModelForCausalLMWithValueHead(AutoModelForCausalLMWithValueHead):
+    '''
+    
+    '''
+    
+    supported_args = (
+    "basis_model",
+    "summary_dropout_prob",
+    "v_head_initializer_range",
+    "v_head_init_strategy",
+    )
     
     def __init__(self,
-                 adapter_model,
-                 basis_model,
+                 adapter_model, 
+                 basis_model: Optional[AutoModelForCausalLMWithValueHead]=None,
                  **kwargs):
         
         super().__init__(adapter_model, **kwargs)
         
-        self.basis_model = basis_model
+        if basis_model:
+            self.basis_model = basis_model
+            
+        # TODO add default basis_model 
+        
         v_head_kwargs, _, _ = self._split_kwargs(kwargs)
         
-        if not any(hasattr(self.basis_model, attribute) for attribute in self.lm_head_namings):
+        if not any(hasattr(self.basis_model.pretrained_model, attribute) for attribute in self.lm_head_namings):
             raise ValueError("The model does not have a language model head, please use a model that has one.")
         
         self.v_head = self._get_head_for_concatenated_models(v_head_kwargs)
@@ -61,12 +45,12 @@ class ProductAutoModelForCausalLMWithValueHead(AutoModelForCausalLMWithValueHead
     
     def _get_head_for_concatenated_models(self, v_head_kwargs):
         
-        return ProductValueHead(self.adapter_model.config, self.basis_model.config, **v_head_kwargs)
+        return ProductValueHead(self.pretrained_model.config, self.basis_model.pretrained_model.config, **v_head_kwargs)
     
         
         
     
-class ProductValueHead(ValueHead):
+class ProductValueHead(nn.Module):
     
     def __init__(self,
                  adapter_config,
@@ -74,22 +58,36 @@ class ProductValueHead(ValueHead):
                  **kwargs):
         
     
-        super().__init__(adapter_config, **kwargs)
+        super().__init__()
+        
+        if not hasattr(adapter_config, "summary_dropout_prob"):
+            summary_dropout_prob = kwargs.pop("summary_dropout_prob", 0.1)
+        else:
+            summary_dropout_prob = adapter_config.summary_dropout_prob     
+        
+        self.dropout = nn.Dropout(summary_dropout_prob) if summary_dropout_prob else nn.Identity()
         
         # get size of hidden layer for basis_model to concatenate
-        if hasattr(basis_config, "hidden_size"):
-            hidden_size = basis_config.hidden_size
-        if hasattr(basis_config, "word_embed_proj_dim"):
-            hidden_size = basis_config.word_embed_proj_dim
-        elif hasattr(basis_config, "is_encoder_decoder"):
-            if basis_config.is_encoder_decoder and hasattr(basis_config, "decoder"):
-                if hasattr(basis_config.decoder, "hidden_size"):
-                    hidden_size = basis_config.decoder.hidden_size
-
-       
-        self.summary = nn.Linear(hidden_size + self.summary.in_features, 1)
+        adapter_hidden_size = self._get_size_of_hidden_layer(adapter_config)
+        basis_hidden_size = self._get_size_of_hidden_layer(basis_config)
+ 
+        self.summary = nn.Linear(adapter_hidden_size + basis_hidden_size, 1)
 
         self.flatten = nn.Flatten()
+        
+    
+    def _get_size_of_hidden_layer(self, config):
+        
+        if hasattr(config, "hidden_size"):
+            hidden_size = config.hidden_size
+        if hasattr(config, "word_embed_proj_dim"):
+            hidden_size = config.word_embed_proj_dim
+        elif hasattr(config, "is_encoder_decoder"):
+            if config.is_encoder_decoder and hasattr(config, "decoder"):
+                if hasattr(config.decoder, "hidden_size"):
+                    hidden_size = config.decoder.hidden_size
+                    
+        return hidden_size
         
         
     def forward(self, hidden_states):
@@ -105,10 +103,9 @@ class ProductValueHead(ValueHead):
         
         except RuntimeError:
             # TODO: make this less hacky
-            # Currently, we're just concatenating this with a zeros tensor, so it doesn't throw an error if the input is too small
-            zeros_tensor = torch.zeros(output.shape[0], self.summary.in_features-output.shape[1])
-            concatenated_output = torch.cat((output, zeros_tensor), dim=1)
-            output = self.summary(concatenated_output)
+            # Currently, we're just outputting a zeros tensor if the dimensions don't match (i.e. only output of adapter is fead to valuehead)
+            
+            output = torch.zeros(output.shape[0], output.shape[1], self.summary.in_features).to(output.device)
             
         return output
         

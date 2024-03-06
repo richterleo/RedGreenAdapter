@@ -136,27 +136,34 @@ class PPOTrainerForProducts(PPOTrainer):
         '''
         
         # TODO: make this more efficient
+        
+        if id(model) == id(self.ref_model):
+            logits, _, values = model(**input_kwargs)
+            return logits, values
 
-        device = model.v_head.summary.weight.device
-        
-        # calculate logits and first part of hidden state for value head using adapter model
-        adapter_logits, adapter_hidden_state = self._get_hidden_state_and_logits(model, device, input_kwargs)
-          
-        # for basis model
-        self.basis_model.eval()
-        
-        with torch.inference_mode():
+        else:
+            device = model.v_head.summary.weight.device
             
-            basis_logits, basis_hidden_state = self._get_hidden_state_and_logits(self.basis_model, device, input_kwargs)
-        
-        
-        # concatenate adapter_hidden_state and basis_hidden_state to feed to value head
-        hidden_state = torch.cat((basis_hidden_state, adapter_hidden_state), dim=1)
-        values = model.v_head(hidden_state).squeeze(-1)
+            # calculate logits and first part of hidden state for value head using adapter model
+            adapter_logits, adapter_hidden_state = self._get_hidden_state_and_logits(model, device, input_kwargs)
+            
+            # for basis model
+            self.basis_model.eval()
+            
+            with torch.inference_mode():
+                
+                basis_logits, basis_hidden_state = self._get_hidden_state_and_logits(self.basis_model, device, input_kwargs)
+            
+            
+            # concatenate adapter_hidden_state and basis_hidden_state to feed to value head
+            hidden_state = torch.cat((basis_hidden_state, adapter_hidden_state), dim=2)
+            values = model.v_head(hidden_state).squeeze(-1)
+            
+            logits = adapter_logits + basis_logits
         
         
         # Because the value head is just another linear layer, we can also add together the values
-        return adapter_logits + basis_logits, values
+        return logits, values
     
     
     def _get_hidden_state_and_logits(self, model, device, input_kwargs):
@@ -171,6 +178,8 @@ class PPOTrainerForProducts(PPOTrainer):
 
         if hidden_state.device != device:
             hidden_state = hidden_state.to(device)
+            
+
             
         return logits, hidden_state
         

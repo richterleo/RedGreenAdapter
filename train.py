@@ -47,6 +47,7 @@ from product_of_experts import (BaseModelSumLogitsProcessor,
                     AdapterModelLogitsProcessor, 
                     logits_processor_wrapper, 
                     update_get_logits_warper)
+from value_head import ProductValueHead, ProductAutoModelForCausalLMWithValueHead
 
 
 tqdm.pandas()
@@ -60,7 +61,7 @@ class ScriptArguments:
 
     # NOTE: gpt2 models use Conv1D instead of Linear layers which are not yet supported in 8 bit mode
     # models like gpt-neo* models are more suitable.
-    base_model_name: Optional[str] = field(default="openai-community/gpt2-large", metadata={"help": "the base model name"})
+    basis_model_name: Optional[str] = field(default="openai-community/gpt2-large", metadata={"help": "the base model name"})
     adapter_model_name: Optional[str] = field(default="openai-community/gpt2", metadata={"help": "the base model name"})
     log_with: Optional[str] = field(default=None, metadata={"help": "use 'wandb' to log with wandb"})
     learning_rate: Optional[float] = field(default=(1.47e-5) * 2, metadata={"help": "the learning rate"})
@@ -91,25 +92,28 @@ ppo_config = PPOConfig(
 )
 
 ppo_sample_config = deepcopy(ppo_config)
-ppo_sample_config.model_name = script_args.base_model_name
+ppo_sample_config.model_name = script_args.basis_model_name
 
 
 # set seed before initializing value head for deterministic eval
 set_seed(ppo_config.seed)
 
-model = AutoModelForCausalLM.from_pretrained(ppo_config.model_name) # torch_dtype=torch.bfloat16 not available for gpt2
-model = AutoModelForCausalLMWithValueHead.from_pretrained(model)
-
 # This serves as reference model as well
 # Hope there are no problems with 
-base_model = AutoModelForCausalLM.from_pretrained(script_args.base_model_name) # torch_dtype=torch.bfloat16 not available for gpt2
-base_model = AutoModelForCausalLMWithValueHead.from_pretrained(base_model)
-ref_model = deepcopy(base_model)
+basis_model = AutoModelForCausalLM.from_pretrained(script_args.basis_model_name) # torch_dtype=torch.bfloat16 not available for gpt2
+basis_model = AutoModelForCausalLMWithValueHead.from_pretrained(basis_model)
+ref_model = deepcopy(basis_model)
+
+
+# define the adapter model
+model = AutoModelForCausalLM.from_pretrained(ppo_config.model_name) # torch_dtype=torch.bfloat16 not available for gpt2
+model = ProductAutoModelForCausalLMWithValueHead.from_pretrained(model, basis_model=basis_model) # my class, has changed value head
+
 
 # GPT-2 / GPT-J tokenizer has a pad token, but it is not eos_token by default. We need to set it to eos_token.
 # only for this model.
 # need to take tokenizer from smaller model #TODO ask if this might be a problem/ there's some better solution
-tokenizer = AutoTokenizer.from_pretrained(script_args.base_model_name)
+tokenizer = AutoTokenizer.from_pretrained(script_args.basis_model_name)
 tokenizer.pad_token = tokenizer.eos_token
 
 # We make sure to use `Adam` optimizer on the model parameters that require gradients.
@@ -128,7 +132,7 @@ dataset = build_dataset(ppo_config,
 ppo_trainer_for_products = PPOTrainerForProducts(
     ppo_config,
     model=model,
-    source_model=base_model,
+    basis_model=basis_model,
     tokenizer=tokenizer,
     ref_model=ref_model,
     dataset=dataset,
@@ -139,7 +143,7 @@ ppo_trainer_for_products = PPOTrainerForProducts(
 # Create a second PPOTrainer that we use solely for generating samples during the rollout phase of PPO
 sample_ppo_trainer = PPOTrainer(
     ppo_sample_config,
-    model=base_model,
+    model=basis_model,
     tokenizer=tokenizer,
     ref_model=ref_model, 
     dataset=dataset,
@@ -189,18 +193,16 @@ for epoch, batch in tqdm(enumerate(ppo_trainer_for_products.dataloader)):
         
         # for generation, we don't keep gradients, so we don't necessarily need the ppo_trainer 
         if generation_kwargs['do_sample']:
-            original_warp_creator = base_model.pretrained_model._get_logits_warper
-            updated_get_logits_warper = update_get_logits_warper(original_warp_creator, model)
-            base_model.pretrained_model._get_logits_warper = updated_get_logits_warper.__get__(base_model.pretrained_model, base_model.pretrained_model.__class__)
+            original_warp_creator = basis_model.pretrained_model._get_logits_warper
+            updated_get_logits_warper = update_get_logits_warper(original_warp_creator, ppo_trainer_for_products.model)
+            basis_model.pretrained_model._get_logits_warper = updated_get_logits_warper.__get__(basis_model.pretrained_model, basis_model.pretrained_model.__class__)
             
             # Need to save ref_response for KL divergence 
             response = sample_ppo_trainer.generate(query, **generation_kwargs)
             
             # validate response tensors
             if response is None:
-                empty_response_counter += 1
-                print(f"Empty response {empty_response_counter}")
-                
+                empty_response_counter += 1                
             
             response_tensors.append(response.squeeze()[-gen_len:]) # The prompt is saved separately            
             
