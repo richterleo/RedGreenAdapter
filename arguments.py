@@ -17,6 +17,10 @@ class PPOArgs:
     gradient_accumulation_steps: Optional[int] = field(
         default=1, metadata={"help": "the number of gradient accumulation steps"}
     )
+    reward_function: Optional[str] = field(
+        default='facebook/roberta-hate-speech-dynabench-r4-target', 
+        metadata={"help": "model used as reward signal"})
+    ppo_epochs:Optional[float] = field(default=10, metadata={"help": "number of epochs for PPO training"})
     
 
     

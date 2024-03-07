@@ -1,9 +1,12 @@
+import configparser
 import torch
 import typing
 
 from dataclasses import dataclass, field
 from datasets import Dataset, load_dataset
-from typing import Optional, Union, Callable, List
+from typing import Optional, Union, Callable, List, Dict
+
+from pathlib import Path
 
 from transformers import (
     AutoTokenizer,
@@ -77,3 +80,62 @@ def build_dataset(
     
 def collator(data):
     return dict((key, [d[key] for d in data]) for key in data[0])
+
+
+def parse_config(config_path: Union[str, Path], use_wandb):
+    '''
+    Parses (most parts of) config file and saves down as attributes.
+
+    Args:
+        config_path: path to config file.
+
+    Returns: 
+        root path (of dataset directory), whether files should be overwritten during preprocessing, path to yaml file
+    '''
+    
+    if not isinstance(config_path, str):
+        config_path = config_path.as_posix()
+            
+    model_args = read_config(config_path, "models")
+    logging_args = read_config(config_path, "logging")
+    store_args = read_config(config_path, "directories")
+    
+        
+
+                
+    return model_args, logging_args, store_args
+
+def parse_wandb_args(logging_args):
+    
+    pass
+    
+    
+
+def read_config(config_file: Union[str, Path], section: str) -> Dict:
+    '''
+    Reads configuration dict of a section.
+
+    Args:
+        config_file: path to config file
+        section: section to read
+
+    Returns:
+        configuration dict
+        
+    '''
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    
+    return config[section]
+
+
+if __name__ == "__main__":
+    
+    config_path = "config.ini"
+    if not Path(config_path).exists():
+        print("Path does not exist")
+
+    model_args, logging_args, store_args = parse_config(config_path)
+    
+    print(logging_args)
+    

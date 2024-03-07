@@ -1,5 +1,7 @@
 ./.vscode
-./__pycache__
+./___pycache___
 testing_things.py
 Test
 wandb
+*pyc
+Results
