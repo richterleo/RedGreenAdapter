@@ -1,68 +1,15 @@
-import torch
-#import argparse
-
 from dataclasses import dataclass, field
 from typing import List, Tuple, Literal, Union, Optional
 
+
+
 @dataclass
-class Args:
-    HOME_PATH = '/root/RedGreenAdapter'
+class PPOArgs:
+    '''
     
-    # Basic / global
-    seed: int = 1
-    cuda: bool = torch.cuda.is_available()
-    num_gpus: int = torch.cuda.device_count()
-    cuda_deterministic: bool = True # sets flags for determinism when using CUDA (potentially slow!)
-    
-    # Directories and paths
-    output_dir: str = f'{HOME_PATH}/RealToxicityPrompts'
-    resume_dir: Optional[str] = None # directory to resume generation
-    
-    # Logging / Wandb
-    use_wandb: bool = False
-    exp_name: str = "IPA_Implementation"
-    log_dir: str = "logs"
-    wandb_project_name: str = "IPA_Implementation"
-    wandb_entity: str = None
-    
-    # General RL params
-    rl_method : Literal["PPO", "DPO", "KTO"] = "PPO"
-    
-    # Dataset 
-    dataset_name: str = "allenai/real-toxicity-prompts"
-    
-
-    
-
-    
-    
-@dataclass
-class Arguments:
-    """
-    The name of the Casual LM model we wish to fine-tune with PPO
-    """
-
-    # NOTE: gpt2 models use Conv1D instead of Linear layers which are not yet supported in 8 bit mode
-    # models like gpt-neo* models are more suitable.
-    
-    # General RL params
-    rl_method: Literal["PPO", "DPO", "KTO"] = field(default="PPO", metadata={"help": "Which RL method to use"})
-    
-    # Models
-    basis_model_name: Optional[str] = field(default="openai-community/gpt2-large", metadata={"help": "the base model name"})
-    adapter_model_name: Optional[str] = field(default="openai-community/gpt2", metadata={"help": "the base model name"})
-    
-    # Dataset params
+    '''
     dataset_name: Optional[str] = field(default="allenai/real-toxicity-prompts")
-    
-    # Logging/Wandb
-    log_with: Optional[str] = field(default=None, metadata={"help": "use 'wandb' to log with wandb"})
-    exp_name: Optional[str] = field(default="IPA_Implementation", metadata={"help": "name of experiment for logging"})
-    log_dir: Optional[str] = field(default="logs", metadata={"help": ""})
-    wandb_project_name: str = "IPA_Implementation"
-    
-    
-    # PPO params
+
     learning_rate: Optional[float] = field(default=(1.47e-5) * 2, metadata={"help": "the learning rate"})
     mini_batch_size: Optional[int] = field(default=4, metadata={"help": "the PPO minibatch size"})
     batch_size: Optional[int] = field(default=16, metadata={"help": "the batch size"})
@@ -71,15 +18,39 @@ class Arguments:
         default=1, metadata={"help": "the number of gradient accumulation steps"}
     )
     
-    # DPO params
+
     
     
-    # Directories and paths
-    home_dir: Optional[str] = field(default='/root/RedGreenAdapter', metadata={"help": "Home directory"})
-    model_save_path: Optional[str] = field(
-        default="Test",
-        metadata={"help": "The path to save the model"},
-        
+@dataclass
+class DPOArgs:
+    """
+    The name of the Casual LM model we wish to fine-tune with PPO
+    """
+
+    # NOTE: gpt2 models use Conv1D instead of Linear layers which are not yet supported in 8 bit mode
+    # models like gpt-neo* models are more suitable.
+    
+    
+    dataset_name: Optional[str] = field(default="Anthropic/hh-rlhf")
+    
+    beta: float = field(default=0.1, metadata={"help": "the beta parameter for DPO loss"})
+    max_length: int = field(default=512, metadata={"help": "max length of each sample"})
+    max_prompt_length: int = field(default=128, metadata={"help": "max length of each sample's prompt"})
+    max_target_length: int = field(
+        default=128, metadata={"help": "Only used for encoder decoder model. Max target of each sample's prompt"}
     )
+    sanity_check: bool = field(default=True, metadata={"help": "only train on 1000 samples"})
+    ignore_bias_buffers: bool = field(
+        default=False,
+        metadata={
+            "help": "debug argument for distributed training;"
+            "fix for DDP issues with LM bias/mask buffers - invalid scalar type,`inplace operation. See"
+            "https://github.com/huggingface/transformers/issues/22482#issuecomment-1595790992"
+        },
+    )
+    generate_during_eval: bool = field(default=False, metadata={"help": "Generate during evaluation"})
+    
+    
+    
     
 
