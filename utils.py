@@ -82,60 +82,39 @@ def collator(data):
     return dict((key, [d[key] for d in data]) for key in data[0])
 
 
-def parse_config(config_path: Union[str, Path], use_wandb):
-    '''
-    Parses (most parts of) config file and saves down as attributes.
-
-    Args:
-        config_path: path to config file.
-
-    Returns: 
-        root path (of dataset directory), whether files should be overwritten during preprocessing, path to yaml file
-    '''
-    
-    if not isinstance(config_path, str):
-        config_path = config_path.as_posix()
-            
-    model_args = read_config(config_path, "models")
-    logging_args = read_config(config_path, "logging")
-    store_args = read_config(config_path, "directories")
-    
-        
-
-                
-    return model_args, logging_args, store_args
-
-def parse_wandb_args(logging_args):
-    
-    pass
-    
-    
-
-def read_config(config_file: Union[str, Path], section: str) -> Dict:
-    '''
-    Reads configuration dict of a section.
-
-    Args:
-        config_file: path to config file
-        section: section to read
-
-    Returns:
-        configuration dict
-        
-    '''
-    config = configparser.ConfigParser()
-    config.read(config_file)
-    
-    return config[section]
+def extract_anthropic_prompt(prompt_and_response):
+    """Extract the anthropic prompt from a prompt and response pair."""
+    search_term = "\n\nAssistant:"
+    search_term_idx = prompt_and_response.rfind(search_term)
+    assert search_term_idx != -1, f"Prompt and response does not contain '{search_term}'"
+    return prompt_and_response[: search_term_idx + len(search_term)]
 
 
-if __name__ == "__main__":
-    
-    config_path = "config.ini"
-    if not Path(config_path).exists():
-        print("Path does not exist")
+def get_hh(split: str, sanity_check: bool = False, silent: bool = False, cache_dir: Optional[str] = None) -> Dataset:
+    """Load the Anthropic Helpful-Harmless dataset from Hugging Face and convert it to the necessary format.
 
-    model_args, logging_args, store_args = parse_config(config_path)
-    
-    print(logging_args)
+    The dataset is converted to a dictionary with the following structure:
+    {
+        'prompt': List[str],
+        'chosen': List[str],
+        'rejected': List[str],
+    }
+
+    Prompts should be structured as follows:
+      \n\nHuman: <prompt>\n\nAssistant:
+    Multiple turns are allowed, but the prompt should always start with \n\nHuman: and end with \n\nAssistant:.
+    """
+    dataset = load_dataset("Anthropic/hh-rlhf", split=split, cache_dir=cache_dir)
+    if sanity_check:
+        dataset = dataset.select(range(min(len(dataset), 1000)))
+
+    def split_prompt_and_responses(sample) -> Dict[str, str]:
+        prompt = extract_anthropic_prompt(sample["chosen"])
+        return {
+            "prompt": prompt,
+            "chosen": sample["chosen"][len(prompt) :],
+            "rejected": sample["rejected"][len(prompt) :],
+        }
+
+    return dataset.map(split_prompt_and_responses)
     
