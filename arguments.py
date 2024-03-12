@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 from typing import List, Tuple, Literal, Union, Optional
 
+from transformers import HfArgumentParser, TrainingArguments
+from trl import ModelConfig
+
+
 
 
 @dataclass
@@ -54,6 +58,36 @@ class DPOArgs:
     )
     generate_during_eval: bool = field(default=False, metadata={"help": "Generate during evaluation"})
     
+    # model_name_or_path: str= field(default="gpt2", metadata={"help": "only train on 1000 samples"})
+    # per_device_train_batch_size: int = field(default=4, metadata={"help": "only train on 1000 samples"})
+    # max_steps : int = field(default=1000, metadata={"help": "only train on 1000 samples"})
+    # learning_rate: Optional[float] =field(default=1e-3 , metadata={"help": "only train on 1000 samples"})
+    # gradient_accumulation_steps: int = field(default=1, metadata={"help": "only train on 1000 samples"})
+    # logging_step: int = field(default=10, metadata={"help": "only train on 1000 samples"}) 
+    # eval_steps: int = field(default=500, metadata={"help": "only train on 1000 samples"}) 
+    # output_dir: str= field(default="dpo_anthropic_hh", metadata={"help": "only train on 1000 samples"}) 
+    # warmup_steps: int= field(default=150, metadata={"help": "only train on 1000 samples"}) 
+    # report_to_wandb: int = field(default=False, metadata={"help": "only train on 1000 samples"})
+    # bf16 : int= field(default=False, metadata={"help": "only train on 1000 samples"})
+    # logging_first_step : int= field(default=False, metadata={"help": "only train on 1000 samples"})
+    # no_remove_unused_columns : Optional[int]= field(default=True, metadata={"help": "only train on 1000 samples"})
+    
+    
+    
+training_args = {
+    "model_name_or_path" :"gpt2",
+    "per_device_train_batch_size": 4,
+    "max_steps": 1000,
+    "learning_rate": 1e-3,
+    "gradient_accumulation_steps" :1,
+    "logging_steps": 10,
+    "eval_steps" :500,
+    "output_dir":"dpo_anthropic_hh",
+    "warmup_steps" :150}
+    # report_to = "wandb",
+    # bf16,
+    # logging_first_step)
+  
     
     
     

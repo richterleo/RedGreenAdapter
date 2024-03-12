@@ -1,3 +1,5 @@
+import argparse
+import configparser
 import torch
 
 from copy import deepcopy
@@ -10,18 +12,25 @@ from transformers import (
     AutoTokenizer,
     HfArgumentParser,
     RobertaForSequenceClassification,
-    RobertaTokenizer
+    RobertaTokenizer,
+    TrainingArguments
 )
 
 from trl import (AutoModelForCausalLMWithValueHead, 
                  PPOConfig, 
                  PPOTrainer, 
-                 set_seed)
+                 set_seed,
+                 DPOTrainer,
+                 ModelConfig,
+                 get_kbit_device_map, 
+                 get_peft_config, 
+                 get_quantization_config)
 
 from trl.core import LengthSampler
 
 # my components
-from utils import build_dataset, collator
+from arguments import DPOArgs, training_args
+from utils import build_dataset, collator, get_hh, extract_anthropic_prompt
 from PPO_adapter import PPOTrainerForProducts
 from product_of_experts import update_get_logits_warper
 from value_head import ProductAutoModelForCausalLMWithValueHead
@@ -184,21 +193,20 @@ def train_ppo(config, script_args):
                 
                 
                 
-def train_dpo(config, script_args):
+def train_dpo(config, script_args, targs):
     
     
-    parser = HfArgumentParser((ScriptArguments, TrainingArguments, ModelConfig))
-    args, training_args, model_config = parser.parse_args_into_dataclasses()
+    parser = HfArgumentParser((script_args, TrainingArguments, ModelConfig))
+    args, training_args, model_config = parser.parse_dict(targs)
 
     ################
     # Model & Tokenizer
     ################
-    torch_dtype = (
-        model_config.torch_dtype
-        if model_config.torch_dtype in ["auto", None]
-        else getattr(torch, model_config.torch_dtype)
-    )
+    torch_dtype = torch.float16 #if available, use torch.bfloat16, but that's not available for gpt family
+    
     quantization_config = get_quantization_config(model_config)
+
+    
     model_kwargs = dict(
         revision=model_config.model_revision,
         trust_remote_code=model_config.trust_remote_code,
@@ -208,20 +216,16 @@ def train_dpo(config, script_args):
         device_map=get_kbit_device_map() if quantization_config is not None else None,
         quantization_config=quantization_config,
     )
-    model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs)
-    peft_config = get_peft_config(model_config)
-    if peft_config is None:
-        model_ref = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs)
-    else:
-        model_ref = None
-    tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    if args.ignore_bias_buffers:
-        # torch distributed hack
-        model._ddp_params_and_buffers_to_ignore = [
-            name for name, buffer in model.named_buffers() if buffer.dtype == torch.bool
-        ]
+    
+    # model = AutoModelForCausalLM.from_pretrained(config['models']['adapter_model_name'], **model_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(config['models']['adapter_model_name'])
+    
+    
+    basis_model = AutoModelForCausalLM.from_pretrained(config['models']['basis_model_name']) # torch_dtype=torch.bfloat16 not available for gpt2
+    ref_model = deepcopy(basis_model)
+    
+    tokenizer = AutoTokenizer.from_pretrained(config['models']['basis_model_name'])
+    tokenizer.pad_token = tokenizer.eos_token
 
     ################
     # Dataset
@@ -234,7 +238,7 @@ def train_dpo(config, script_args):
     ################
     trainer = DPOTrainer(
         model,
-        model_ref,
+        ref_model,
         args=training_args,
         beta=args.beta,
         train_dataset=train_dataset,
@@ -244,7 +248,29 @@ def train_dpo(config, script_args):
         max_target_length=args.max_target_length,
         max_prompt_length=args.max_prompt_length,
         generate_during_eval=args.generate_during_eval,
-        peft_config=get_peft_config(model_config),
+        # peft_config=get_peft_config(model_config),
     )
     trainer.train()
     trainer.save_model(training_args.output_dir)
+    
+    
+
+if __name__ == "__main__":
+    
+    targs = TrainingArguments
+    print(targs)
+    
+    parser = argparse.ArgumentParser(description='RedGreen Adapter Training.')
+    parser.add_argument('--config_path', type=str, default= 'config.ini', help='Path to config file.')
+
+    args = parser.parse_args()
+
+    config_path = args.config_path
+    config = configparser.ConfigParser()
+    config.read(config_path)
+    
+    config_dict = config._sections
+    config_dict['logs']['use_wandb'] = False    
+    train_dpo(config_dict, DPOArgs, training_args)
+    
+    
