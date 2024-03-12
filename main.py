@@ -4,7 +4,7 @@ import configparser
 from tqdm import tqdm
 from typing import Optional
 
-from arguments import PPOArgs, DPOArgs
+from arguments import PPOArgs, DPOArgs, training_args
 from train import train_ppo, train_dpo
 
 tqdm.pandas()
@@ -16,8 +16,8 @@ if __name__ == "__main__":
     # set up parser
     parser = argparse.ArgumentParser(description='RedGreen Adapter Training.')
     parser.add_argument('--config_path', type=str, default= 'config.ini', help='Path to config file.')
-    parser.add_argument('--rl_method', choices=['PPO', 'DPO', 'KTO'], default='PPO', help='Choose Adapter Learning Method.')
-    parser.add_argument('--use_wandb', default="True")
+    parser.add_argument('--rl_method', choices=['PPO', 'DPO', 'KTO'], default='DPO', help='Choose Adapter Learning Method.')
+    parser.add_argument('--use_wandb', default="False")
 
     args = parser.parse_args()
 
@@ -32,7 +32,7 @@ if __name__ == "__main__":
         train_ppo(config_dict, PPOArgs)
         
     elif args.rl_method == "DPO":
-        train_dpo(config_dict, DPOArgs)
+        train_dpo(config_dict, DPOArgs, training_args)
     
 
 

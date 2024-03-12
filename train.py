@@ -32,6 +32,7 @@ from trl.core import LengthSampler
 from arguments import DPOArgs, training_args
 from utils import build_dataset, collator, get_hh, extract_anthropic_prompt
 from PPO_adapter import PPOTrainerForProducts
+from DPO_adapter import DPOTrainerForProducts
 from product_of_experts import update_get_logits_warper
 from value_head import ProductAutoModelForCausalLMWithValueHead
 
@@ -236,8 +237,9 @@ def train_dpo(config, script_args, targs):
     ################
     # Training
     ################
-    trainer = DPOTrainer(
+    trainer = DPOTrainerForProducts(
         model,
+        basis_model,
         ref_model,
         args=training_args,
         beta=args.beta,
