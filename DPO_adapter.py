@@ -83,6 +83,9 @@ class DPOTrainerForProducts(DPOTrainer):
         ).logits
         
         # get logits from basis model
+        
+        self.basis_model.eval() #TODO: think about whether we want the basis model in eval or train mode
+        
         with torch.inference_mode():
             all_logits_basis_model = self.basis_model(
                 concatenated_batch["concatenated_input_ids"],
