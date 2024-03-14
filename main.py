@@ -1,5 +1,6 @@
 import argparse
 import configparser
+import os
 
 from tqdm import tqdm
 from typing import Optional
@@ -7,8 +8,7 @@ from typing import Optional
 from arguments import PPOArgs, DPOArgs, training_args
 from train import train_ppo, train_dpo
 
-tqdm.pandas()
-
+os.environ["WANDB_PROJECT"] = "RedGreen_Adapter"
                              
 
 if __name__ == "__main__":

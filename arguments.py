@@ -4,7 +4,7 @@ from typing import List, Tuple, Literal, Union, Optional
 from transformers import HfArgumentParser, TrainingArguments
 from trl import ModelConfig
 
-
+from utils import create_run_string
 
 
 @dataclass
@@ -83,8 +83,10 @@ training_args = {
     "logging_steps": 10,
     "eval_steps" :500,
     "output_dir":"dpo_anthropic_hh",
-    "warmup_steps" :150}
-    # report_to = "wandb",
+    "warmup_steps" :150,
+    "report_to": "wandb",
+    # "load_best_model_at_end": True,
+    "run_name": create_run_string()}
     # bf16,
     # logging_first_step)
   

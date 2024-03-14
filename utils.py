@@ -2,6 +2,7 @@ import configparser
 import torch
 import typing
 
+from datetime import datetime
 from dataclasses import dataclass, field
 from datasets import Dataset, load_dataset
 from typing import Optional, Union, Callable, List, Dict
@@ -117,4 +118,13 @@ def get_hh(split: str, sanity_check: bool = False, silent: bool = False, cache_d
         }
 
     return dataset.map(split_prompt_and_responses)
+
+
+def create_run_string():
+    # Get current date and time
+    current_datetime = datetime.now()
+    # Format the datetime to a string
+    datetime_str = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
+    # Create and return the string with "run" appended with the current date and time
+    return f"run_{datetime_str}"
     
