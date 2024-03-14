@@ -86,6 +86,7 @@ training_args = {
     "warmup_steps" :150,
     "report_to": "wandb",
     # "load_best_model_at_end": True,
+    "generate_during_eval": True,
     "run_name": create_run_string()}
     # bf16,
     # logging_first_step)

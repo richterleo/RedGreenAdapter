@@ -219,9 +219,10 @@ class AdapterModelLogitsProcessor(LogitsProcessor):
         
         self.top_p_logits_warper = TopPLogitsWarper(self.top_p)
         
+        # if post_normalize, we normalize the probability distribution after truncating
         if self.post_normalize:
             self.logit_normalizer = LogitNormalization()
-            self.logits_processor_lst = LogitsProcessorList([self.logit_normalizer, self.top_p_logits_warper])
+            self.logits_processor_lst = LogitsProcessorList([self.top_p_logits_warper, self.logit_normalizer])
         else:
             self.logits_processor_lst = LogitsProcessorList([self.top_p_logits_warper])
         
@@ -284,6 +285,7 @@ def update_get_logits_warper(original_method, model, model_generation_config=Non
     
     def wrapper(self, generation_config):
         
+        # this means the basis model logits are already normalized
         logits_warper_lst = original_method(generation_config)
         
         # sum_logits_warper = ModelLogitsProcessor(model,

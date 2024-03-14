@@ -157,7 +157,8 @@ def train_ppo(config, script_args):
             if generation_kwargs['do_sample']:
                 original_warp_creator = basis_model.pretrained_model._get_logits_warper
                 updated_get_logits_warper = update_get_logits_warper(original_warp_creator, ppo_trainer_for_products.model)
-                basis_model.pretrained_model._get_logits_warper = updated_get_logits_warper.__get__(basis_model.pretrained_model, basis_model.pretrained_model.__class__)
+                basis_model.pretrained_model._get_logits_warper = updated_get_logits_warper.__get__(basis_model.pretrained_model, 
+                                                                                                    basis_model.pretrained_model.__class__)
                 
                 # Need to save ref_response for KL divergence 
                 response = sample_ppo_trainer.generate(query, **generation_kwargs)
