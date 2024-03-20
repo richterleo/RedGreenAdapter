@@ -84,7 +84,7 @@ training_args = {
     "eval_steps" :500,
     "output_dir":"dpo_anthropic_hh",
     "warmup_steps" :150,
-    "report_to": "wandb",
+    # "report_to": "wandb",
     # "load_best_model_at_end": True,
     "generate_during_eval": True,
     "run_name": create_run_string()}
