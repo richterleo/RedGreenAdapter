@@ -5,3 +5,4 @@ Test
 wandb
 *pyc
 Results
+test_distributed_training.py
