@@ -18,11 +18,12 @@ source ~/.bashrc
 
 # Create a Conda environment
 echo "Creating conda environment"
-~/miniconda3/bin/conda create env -f environment.yml
+~/miniconda3/bin/conda env create -f environment.yml
 
 # Add conda activation command to bashrc
 echo "conda activate redgreen" >> ~/.bashrc
 
 # Activate the Conda environment
 source ~/miniconda3/bin/activate redgreen
+
 

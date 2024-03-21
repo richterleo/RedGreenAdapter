@@ -20,3 +20,5 @@ You can train a LLM adapter on the [Anthropic Helpful-Harmless dataset](https://
 [tbc]
 
 ```
+accelerate launch --config_file '~/RedGreenAdapter/accelerate_config.yml' main.py 
+```
