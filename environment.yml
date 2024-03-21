@@ -172,7 +172,7 @@ dependencies:
       - smmap==5.0.1
       - tokenizers==0.15.2
       - transformers==4.38.2
-      - trl==0.7.12.dev0
       - tyro==0.7.3
       - wandb==0.16.4
-prefix: /opt/conda/envs/redgreen
+      - git+https://github.com/huggingface/trl#egg=trl
+prefix: /home/leo/RedGreenAdapter
