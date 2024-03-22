@@ -25,49 +25,6 @@ from trl import (
     PreTrainedModelWrapper
 )
 
-
-
-class BaseModelSumLogitsProcessor(LogitsProcessor):
-    
-    def __init__(self, 
-                 source_model_name, 
-                 *args, 
-                 **kwargs):
-        
-        super().__init__(*args, **kwargs)
-        self.source_model_name = source_model_name
-        self.source_model = AutoModelForCausalLM.from_pretrained(source_model_name)
-        self.device = None
-        
-        
-    def _calc_bmodel_next_token_logits(self, 
-                          input_ids,
-                          scores):
-        
-        if not self.device:
-            self.device = input_ids.device
-            self.source_model.to(self.device)
-        
-        self.source_model.eval() # TODO: is this necessary?
-        
-        with torch.inference_mode():                           
-            outputs = self.source_model(input_ids=input_ids, return_dict=True) # outputs (lm_logits, loss, value) 
-            bmodel_next_token_logits = outputs.logits[:, -1, :] # get output for last/next token
-                                                #attention_mask=attention_mask)[0]      
-        
-        return bmodel_next_token_logits
-                 
-        
-    
-    def __call__(self, 
-                 input_ids, 
-                 scores):
-
-        
-        # if self.rng is None:
-        #     self.rng = torch.Generator(device=input_ids.device)
-        
-        return self._calc_bmodel_next_token_logits(input_ids, scores) + scores
         
 
 class ModelLogitsProcessor(LogitsProcessor):
@@ -87,7 +44,7 @@ class ModelLogitsProcessor(LogitsProcessor):
         else:
             self.generation_config = self._get_default_generation_config(base)
             
-        self.device = None
+        # self.device = None
             
     def _get_default_generation_config(self, base):
         
@@ -215,7 +172,7 @@ class AdapterModelLogitsProcessor(LogitsProcessor):
         self.adapter_model = adapter_model
         self.post_normalize = post_normalize
         self.top_p = top_p
-        self.device = None
+        # self.device = None
         
         self.top_p_logits_warper = TopPLogitsWarper(self.top_p)
         
@@ -231,9 +188,9 @@ class AdapterModelLogitsProcessor(LogitsProcessor):
                           input_ids,
                           scores):
         
-        if not self.device:
-            self.device = input_ids.device
-            self.adapter_model.to(self.device)
+        # if not self.device:
+        #     self.device = input_ids.device
+        #     self.adapter_model.to(self.device)
         
         self.adapter_model.eval() # TODO: is this necessary?
         

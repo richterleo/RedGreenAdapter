@@ -48,7 +48,7 @@ class DPOTrainerForProducts(DPOTrainer):
             peft_config=peft_config
         )
         
-        self.basis_model = basis_model
+        self.basis_model = self.accelerator.prepare_model(self.base_model, evaluation_mode=True)
         
     
     def concatenated_forward(
