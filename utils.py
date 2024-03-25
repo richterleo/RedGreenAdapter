@@ -1,4 +1,6 @@
 import configparser
+import time
+from contextlib import contextmanager
 import torch
 import typing
 
@@ -127,4 +129,14 @@ def create_run_string():
     datetime_str = current_datetime.strftime("%Y-%m-%d_%H:%M:%S")
     # Create and return the string with "run" appended with the current date and time
     return f"run_{datetime_str}"
+
+
+@contextmanager
+def time_block(label):
+    start = time.time()
+    try:
+        yield
+    finally:
+        end = time.time()
+        print(f"{label}: {end - start} seconds")
     

@@ -2,6 +2,8 @@ import argparse
 import configparser
 import torch
 
+
+
 from copy import deepcopy
 from torch.optim import Adam
 from tqdm import tqdm
@@ -30,7 +32,7 @@ from trl.core import LengthSampler
 
 # my components
 from arguments import DPOArgs, training_args
-from utils import build_dataset, collator, get_hh, extract_anthropic_prompt
+from utils import build_dataset, collator, get_hh, extract_anthropic_prompt, time_block
 from PPO_adapter import PPOTrainerForProducts
 from DPO_adapter import DPOTrainerForProducts
 from product_of_experts import update_get_logits_warper
@@ -197,16 +199,27 @@ def train_ppo(config, script_args):
                 
 def train_dpo(config, script_args, targs):
     
+    print(f"Hello, we are now in the dpo training loop")
     
-    parser = HfArgumentParser((script_args, TrainingArguments, ModelConfig))
-    args, training_args, model_config = parser.parse_dict(targs)
+    with time_block('Block 1'):
+        parser = HfArgumentParser((script_args, TrainingArguments, ModelConfig))
+        print("parser created")
+        
+    with time_block('Block 2'):
+        args, training_args, model_config = parser.parse_dict(targs)
+        print("args defined")
 
     ################
     # Model & Tokenizer
     ################
-    torch_dtype = torch.float16 #if available, use torch.bfloat16, but that's not available for gpt family
     
-    quantization_config = get_quantization_config(model_config)
+    with time_block('Block 3'):
+        torch_dtype = torch.bfloat16 #if available, use torch.bfloat16, but that's not available for gpt family
+        print("torch dtype defined")
+    
+    with time_block('Block 4'):
+        quantization_config = get_quantization_config(model_config)
+        print("got quantization config")
 
     
     model_kwargs = dict(
@@ -220,24 +233,31 @@ def train_dpo(config, script_args, targs):
     )
     
     # model = AutoModelForCausalLM.from_pretrained(config['models']['adapter_model_name'], **model_kwargs)
-    model = AutoModelForCausalLM.from_pretrained(config['models']['adapter_model_name'])
+    with time_block('Block 5'):
+        print("Now loading the adapter model")
+        model = AutoModelForCausalLM.from_pretrained(config['models']['adapter_model_name'])
     
     
-    basis_model = AutoModelForCausalLM.from_pretrained(config['models']['basis_model_name']) # torch_dtype=torch.bfloat16 not available for gpt2
-    ref_model = deepcopy(basis_model)
+    with time_block('Block 6'):
+        print("Now loading the basis model")
+        basis_model = AutoModelForCausalLM.from_pretrained(config['models']['basis_model_name']) # torch_dtype=torch.bfloat16 not available for gpt2
+        ref_model = deepcopy(basis_model)
     
-    tokenizer = AutoTokenizer.from_pretrained(config['models']['basis_model_name'])
-    tokenizer.pad_token = tokenizer.eos_token
+    with time_block('Block 7'):
+        tokenizer = AutoTokenizer.from_pretrained(config['models']['basis_model_name'])
+        tokenizer.pad_token = tokenizer.eos_token
 
     ################
     # Dataset
     ################
+    print("Now constructing the dataset")
     train_dataset = get_hh("train", sanity_check=args.sanity_check)
     eval_dataset = get_hh("test", sanity_check=args.sanity_check)
 
     ################
     # Training
     ################
+    print(f"Now constructing the DPO Trainer")
     trainer = DPOTrainerForProducts(
         model,
         basis_model,
@@ -253,6 +273,8 @@ def train_dpo(config, script_args, targs):
         generate_during_eval=args.generate_during_eval,
         # peft_config=get_peft_config(model_config),
     )
+    
+    print("Now starting the training")
     trainer.train()
     trainer.save_model(training_args.output_dir)
     

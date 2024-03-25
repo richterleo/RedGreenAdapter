@@ -175,4 +175,4 @@ dependencies:
       - tyro==0.7.3
       - wandb==0.16.4
       - git+https://github.com/huggingface/trl#egg=trl
-prefix: /home/leo/RedGreenAdapter
+prefix: /root/RedGreenAdapter

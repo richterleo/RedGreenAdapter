@@ -1,0 +1,11 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "accelerateSetup",
+            "type": "shell",
+            "command": "accelerate launch --config_file /root/RedGreenAdapter/accelerate_config.yml ${file}",
+            "problemMatcher": []
+        }
+    ]
+}

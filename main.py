@@ -9,6 +9,7 @@ from arguments import PPOArgs, DPOArgs, training_args
 from train import train_ppo, train_dpo
 
 os.environ["WANDB_PROJECT"] = "RedGreen_Adapter"
+os.environ["WANDB_API_KEY"] = "1c84a4abed1d390fbe37478c7cb82a84e4650881"
                              
 
 if __name__ == "__main__":
@@ -17,7 +18,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='RedGreen Adapter Training.')
     parser.add_argument('--config_path', type=str, default= 'config.ini', help='Path to config file.')
     parser.add_argument('--rl_method', choices=['PPO', 'DPO', 'KTO'], default='DPO', help='Choose Adapter Learning Method.')
-    parser.add_argument('--use_wandb', default="False")
+    parser.add_argument('--use_wandb', default="True")
 
     args = parser.parse_args()
 
@@ -32,6 +33,7 @@ if __name__ == "__main__":
         train_ppo(config_dict, PPOArgs)
         
     elif args.rl_method == "DPO":
+        print(f"We are using wandb: {training_args['report_to']}")
         train_dpo(config_dict, DPOArgs, training_args)
     
 

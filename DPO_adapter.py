@@ -48,7 +48,7 @@ class DPOTrainerForProducts(DPOTrainer):
             peft_config=peft_config
         )
         
-        self.basis_model = self.accelerator.prepare_model(self.base_model, evaluation_mode=True)
+        self.basis_model = self.accelerator.prepare_model(basis_model, evaluation_mode=True)
         
     
     def concatenated_forward(
@@ -119,59 +119,59 @@ class DPOTrainerForProducts(DPOTrainer):
         return (chosen_logps, rejected_logps, chosen_logits, rejected_logits)
     
     
-    def get_batch_samples(self,
-                          model,
-                          batch: Dict[str, torch.LongTensor]) -> Tuple[str, str]:
-        '''
+    # def get_batch_samples(self,
+    #                       model,
+    #                       batch: Dict[str, torch.LongTensor]) -> Tuple[str, str]:
+    #     '''
         
-        '''
-        generate_context_manager = nullcontext if not self._peft_has_been_casted_to_bf16 else torch.cuda.amp.autocast
+    #     '''
+    #     generate_context_manager = nullcontext if not self._peft_has_been_casted_to_bf16 else torch.cuda.amp.autocast
 
         
-        # we need to change how this output is generated
-        with generate_context_manager():
+    #     # we need to change how this output is generated
+    #     with generate_context_manager():
             
-            # we add a logits warper that is based on the adapter. This will be a truncated version
-            # We do this by monkey patching: by using 
-            original_warp_creator = self.basis_model._get_logits_warper
-            updated_get_logits_warper = update_get_logits_warper(original_warp_creator, model)
-            self.basis_model.pretrained_model._get_logits_warper = updated_get_logits_warper.__get__(self.basis_model.pretrained_model, 
-                                                                                                self.basis_model.pretrained_model.__class__)
+    #         # we add a logits warper that is based on the adapter. This will be a truncated version
+    #         # We do this by monkey patching: by using 
+    #         original_warp_creator = self.basis_model._get_logits_warper
+    #         updated_get_logits_warper = update_get_logits_warper(original_warp_creator, model)
+    #         self.basis_model.pretrained_model._get_logits_warper = updated_get_logits_warper.__get__(self.basis_model.pretrained_model, 
+    #                                                                                             self.basis_model.pretrained_model.__class__)
         
-            policy_output = self.basis_model.generate(
-                input_ids=batch["prompt_input_ids"],
-                attention_mask=batch["prompt_attention_mask"],
-                max_length=self.max_length,
-                do_sample=True,
-                pad_token_id=self.tokenizer.pad_token_id,
-            )
+    #         policy_output = self.basis_model.generate(
+    #             input_ids=batch["prompt_input_ids"],
+    #             attention_mask=batch["prompt_attention_mask"],
+    #             max_length=self.max_length,
+    #             do_sample=True,
+    #             pad_token_id=self.tokenizer.pad_token_id,
+    #         )
 
-            # if reference_output in batch use that otherwise use the reference model
-            if "reference_output" in batch:
-                reference_output = batch["reference_output"]
-            else:
-                if self.ref_model is None:
-                    with self.null_ref_context():
-                        reference_output = self.model.generate(
-                            input_ids=batch["prompt_input_ids"],
-                            attention_mask=batch["prompt_attention_mask"],
-                            max_length=self.max_length,
-                            do_sample=True,
-                            pad_token_id=self.tokenizer.pad_token_id,
-                        )
-                else:
-                    reference_output = self.ref_model.generate(
-                        input_ids=batch["prompt_input_ids"],
-                        attention_mask=batch["prompt_attention_mask"],
-                        max_length=self.max_length,
-                        do_sample=True,
-                        pad_token_id=self.tokenizer.pad_token_id,
-                    )
+    #         # if reference_output in batch use that otherwise use the reference model
+    #         if "reference_output" in batch:
+    #             reference_output = batch["reference_output"]
+    #         else:
+    #             if self.ref_model is None:
+    #                 with self.null_ref_context():
+    #                     reference_output = self.model.generate(
+    #                         input_ids=batch["prompt_input_ids"],
+    #                         attention_mask=batch["prompt_attention_mask"],
+    #                         max_length=self.max_length,
+    #                         do_sample=True,
+    #                         pad_token_id=self.tokenizer.pad_token_id,
+    #                     )
+    #             else:
+    #                 reference_output = self.ref_model.generate(
+    #                     input_ids=batch["prompt_input_ids"],
+    #                     attention_mask=batch["prompt_attention_mask"],
+    #                     max_length=self.max_length,
+    #                     do_sample=True,
+    #                     pad_token_id=self.tokenizer.pad_token_id,
+    #                 )
 
-        policy_output = pad_to_length(policy_output, self.max_length, self.tokenizer.pad_token_id)
-        policy_output_decoded = self.tokenizer.batch_decode(policy_output, skip_special_tokens=True)
+    #     policy_output = pad_to_length(policy_output, self.max_length, self.tokenizer.pad_token_id)
+    #     policy_output_decoded = self.tokenizer.batch_decode(policy_output, skip_special_tokens=True)
 
-        reference_output = pad_to_length(reference_output, self.max_length, self.tokenizer.pad_token_id)
-        reference_output_decoded = self.tokenizer.batch_decode(reference_output, skip_special_tokens=True)
+    #     reference_output = pad_to_length(reference_output, self.max_length, self.tokenizer.pad_token_id)
+    #     reference_output_decoded = self.tokenizer.batch_decode(reference_output, skip_special_tokens=True)
 
-        return policy_output_decoded, reference_output_decoded 
+    #     return policy_output_decoded, reference_output_decoded 

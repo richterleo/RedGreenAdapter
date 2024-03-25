@@ -76,7 +76,7 @@ class DPOArgs:
     
 training_args = {
     "model_name_or_path" :"gpt2",
-    "per_device_train_batch_size": 4,
+    "per_device_train_batch_size": 1,
     "max_steps": 1000,
     "learning_rate": 1e-3,
     "gradient_accumulation_steps" :1,
@@ -86,9 +86,10 @@ training_args = {
     "warmup_steps" :150,
     "report_to": "wandb",
     # "load_best_model_at_end": True,
-    "generate_during_eval": True,
+    "generate_during_eval": False,
     "run_name": create_run_string(),
-    "no_remove_unused_columns":True}
+    # "no_remove_unused_columns":True
+    "bf16": True}
     # bf16,
     # logging_first_step)
   
