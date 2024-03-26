@@ -235,7 +235,9 @@ def train_dpo(config, script_args, targs):
     # model = AutoModelForCausalLM.from_pretrained(config['models']['adapter_model_name'], **model_kwargs)
     with time_block('Block 5'):
         print("Now loading the adapter model")
-        model = AutoModelForCausalLM.from_pretrained(config['models']['adapter_model_name'])
+        model = AutoModelForCausalLM.from_pretrained(
+            config['models']['adapter_model_name'],
+            **model_kwargs)
     
     
     with time_block('Block 6'):
