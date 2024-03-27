@@ -19,14 +19,18 @@ rm -rf ~/miniconda3/miniconda.sh
 # Source the bashrc to refresh the environment
 source ~/.bashrc
 
+# Clone github repository and cd into folder
+git clone https://github.com/richterleo/RedGreenAdapter.git
+cd RedGreenAdapter
+
 # Create a Conda environment
 echo "Creating conda environment"
-~/miniconda3/bin/conda env create -f environment.yml
+conda create -f environment.yml
 
 # Add conda activation command to bashrc
-echo "conda activate redgreen" >> ~/.bashrc
+echo "conda activate redgreenvenv" >> ~/.bashrc
 
 # Activate the Conda environment
-source ~/miniconda3/bin/activate redgreen
+source conda activate redgreenvenv
 
 
