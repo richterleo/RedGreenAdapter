@@ -201,6 +201,8 @@ def train_dpo(config, script_args, targs):
     
     print(f"Hello, we are now in the dpo training loop")
     
+    print(f"We are using cuda: {torch.cuda.is_available()}")
+    
     with time_block('Block 1'):
         parser = HfArgumentParser((script_args, TrainingArguments, ModelConfig))
         print("parser created")
