@@ -4,7 +4,7 @@
         {
             "label": "accelerateSetup",
             "type": "shell",
-            "command": "accelerate launch --config_file /root/RedGreenAdapter/accelerate_config.yml ${file}",
+            "command": "accelerate launch --config_file /root/RedGreenAdapter/single_gpu_config.yml ${file}",
             "problemMatcher": []
         }
     ]

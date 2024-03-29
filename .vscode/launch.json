@@ -28,7 +28,8 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "preLaunchTask": "accelerateSetup"
+            "preLaunchTask": "accelerateSetup",
+            "justMyCode": false
         }
     ]
 }
