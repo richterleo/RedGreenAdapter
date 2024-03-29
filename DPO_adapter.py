@@ -60,7 +60,6 @@ class DPOTrainerForProducts(DPOTrainer):
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
         """
-        print(self.accelerator.device)
         concatenated_batch = self.concatenated_inputs(
             batch,
             is_encoder_decoder=self.is_encoder_decoder,

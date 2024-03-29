@@ -205,82 +205,81 @@ def train_dpo(config, script_args, targs):
     
     with time_block('Block 1'):
         parser = HfArgumentParser((script_args, TrainingArguments, ModelConfig))
-        print("parser created")
-        
-    with time_block('Block 2'):
         args, training_args, model_config = parser.parse_dict(targs)
-        print("args defined")
 
     ################
     # Model & Tokenizer
     ################
     
-    with time_block('Block 3'):
         torch_dtype = torch.bfloat16 #if available, use torch.bfloat16, but that's not available for gpt family
-        print("torch dtype defined")
-    
-    with time_block('Block 4'):
         quantization_config = get_quantization_config(model_config)
-        print("got quantization config")
+
 
     
-    model_kwargs = dict(
-        revision=model_config.model_revision,
-        trust_remote_code=model_config.trust_remote_code,
-        attn_implementation=model_config.attn_implementation,
-        torch_dtype=torch_dtype,
-        use_cache=False if training_args.gradient_checkpointing else True,
-        device_map=get_kbit_device_map() if quantization_config is not None else None,
-        quantization_config=quantization_config,
-    )
+        model_kwargs = dict(
+            revision=model_config.model_revision,
+            trust_remote_code=model_config.trust_remote_code,
+            attn_implementation=model_config.attn_implementation,
+            torch_dtype=torch_dtype,
+            use_cache=False if training_args.gradient_checkpointing else True,
+            device_map=get_kbit_device_map() if quantization_config is not None else None,
+            quantization_config=quantization_config,
+        )
+        
+        print("Define training arguments.")
+    
     
     # model = AutoModelForCausalLM.from_pretrained(config['models']['adapter_model_name'], **model_kwargs)
-    with time_block('Block 5'):
+    with time_block('Block 2'):
         print("Now loading the adapter model")
         model = AutoModelForCausalLM.from_pretrained(
             config['models']['adapter_model_name'],
             **model_kwargs)
     
     
-    with time_block('Block 6'):
+    with time_block('Block 3'):
         print("Now loading the basis model")
         basis_model = AutoModelForCausalLM.from_pretrained(config['models']['basis_model_name']) # torch_dtype=torch.bfloat16 not available for gpt2
         ref_model = deepcopy(basis_model)
     
-    with time_block('Block 7'):
+    with time_block('Block 4'):
+        print("Now loading the tokenizer")
         tokenizer = AutoTokenizer.from_pretrained(config['models']['basis_model_name'])
         tokenizer.pad_token = tokenizer.eos_token
 
     ################
     # Dataset
     ################
-    print("Now constructing the dataset")
-    train_dataset = get_hh("train", sanity_check=args.sanity_check)
-    eval_dataset = get_hh("test", sanity_check=args.sanity_check)
+    with time_block('Block 5'):
+        print("Now constructing the dataset")
+        train_dataset = get_hh("train", sanity_check=args.sanity_check)
+        eval_dataset = get_hh("test", sanity_check=args.sanity_check)
 
     ################
     # Training
     ################
-    print(f"Now constructing the DPO Trainer")
-    trainer = DPOTrainerForProducts(
-        model,
-        basis_model,
-        ref_model,
-        args=training_args,
-        beta=args.beta,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
-        max_length=args.max_length,
-        max_target_length=args.max_target_length,
-        max_prompt_length=args.max_prompt_length,
-        generate_during_eval=args.generate_during_eval,
-        # peft_config=get_peft_config(model_config),
-    )
+    with time_block('Block 6'):
+        print(f"Now constructing the DPO Trainer")
+        trainer = DPOTrainerForProducts(
+            model,
+            basis_model,
+            ref_model,
+            args=training_args,
+            beta=args.beta,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            tokenizer=tokenizer,
+            max_length=args.max_length,
+            max_target_length=args.max_target_length,
+            max_prompt_length=args.max_prompt_length,
+            generate_during_eval=args.generate_during_eval,
+            # peft_config=get_peft_config(model_config),
+        )
     
-    print("Now starting the training")
-    trainer.train()
-    trainer.save_model(training_args.output_dir)
+    with time_block('Block 7'):
+        print("Now starting the training")
+        trainer.train()
+        trainer.save_model(training_args.output_dir)
     
     
 

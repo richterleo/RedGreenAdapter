@@ -10,6 +10,8 @@ from train import train_ppo, train_dpo
 
 os.environ["WANDB_PROJECT"] = "RedGreen_Adapter"
 os.environ["WANDB_API_KEY"] = "1c84a4abed1d390fbe37478c7cb82a84e4650881"
+os.environ["WANDB_LOG_LEVEL"] = "debug"
+os.environ["WANDB_DISABLE_FORK"] = "true"
                              
 
 if __name__ == "__main__":
