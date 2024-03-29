@@ -19,18 +19,21 @@ rm -rf ~/miniconda3/miniconda.sh
 # Source the bashrc to refresh the environment
 source ~/.bashrc
 
-# Clone github repository and cd into folder
-git clone https://github.com/richterleo/RedGreenAdapter.git
-cd RedGreenAdapter
+# # Clone github repository and cd into folder
+# git clone https://github.com/richterleo/RedGreenAdapter.git
+# cd RedGreenAdapter
 
 # Create a Conda environment
 echo "Creating conda environment"
-conda create -f environment.yml
+conda env create -f environment.yml
 
 # Add conda activation command to bashrc
 echo "conda activate redgreenvenv" >> ~/.bashrc
 
 # Activate the Conda environment
 source conda activate redgreenvenv
+
+# Add trl library
+pip install -U git+https://github.com/huggingface/trl
 
 
