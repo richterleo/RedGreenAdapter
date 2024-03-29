@@ -86,7 +86,7 @@ training_args = {
     "warmup_steps" :150,
     "report_to": "wandb",
     # "load_best_model_at_end": True,
-    "generate_during_eval": False,
+    "generate_during_eval": True,
     "run_name": create_run_string(),
     # "no_remove_unused_columns":True
     "bf16": True}

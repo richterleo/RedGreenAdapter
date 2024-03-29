@@ -5,6 +5,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from transformers import PreTrainedModel, PretrainedConfig
+
 
 from trl import AutoModelForCausalLMWithValueHead
 
@@ -110,5 +112,10 @@ class ProductValueHead(nn.Module):
         return output
         
     
+
+class ProductModel(PreTrainedModel):
     
     
+    def __init__(self, config:PretrainedConfig, *inputs, **kwargs):
+        
+        super().__init__()

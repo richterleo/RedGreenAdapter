@@ -11,7 +11,7 @@ from transformers import (
 )
 from trl import DPOTrainer
 
-from product_of_experts import update_get_logits_warper
+from product_of_experts import update_get_logits_warper, SumProcessor
 
 
 class DPOTrainerForProducts(DPOTrainer):
@@ -49,7 +49,7 @@ class DPOTrainerForProducts(DPOTrainer):
         )
         
         self.basis_model = self.accelerator.prepare_model(basis_model, evaluation_mode=True)
-        
+
     
     def concatenated_forward(
         self, 
@@ -78,22 +78,20 @@ class DPOTrainerForProducts(DPOTrainer):
             if self.is_encoder_decoder
             else {}
         )
+        
         all_logits = model(
             concatenated_batch["concatenated_input_ids"],
             attention_mask=concatenated_batch["concatenated_attention_mask"],
-            use_cache=False,
+            # use_cache=False, #TODO: make sure we can use caching
             **model_kwargs,
         ).logits
         
-        # get logits from basis model
-        
-        self.basis_model.eval() #TODO: think about whether we want the basis model in eval or train mode
-        
+        # get logits from basis model       
         with torch.inference_mode():
             all_logits_basis_model = self.basis_model(
                 concatenated_batch["concatenated_input_ids"],
                 attention_mask=concatenated_batch["concatenated_attention_mask"],
-                use_cache=False,
+                # use_cache=False,
                 **model_kwargs,
             ).logits
 
@@ -118,6 +116,61 @@ class DPOTrainerForProducts(DPOTrainer):
 
         return (chosen_logps, rejected_logps, chosen_logits, rejected_logits)
     
+    
+    def get_batch_samples(self,
+                          model,
+                          batch: Dict[str, torch.LongTensor]) -> Tuple[str, str]:
+        '''
+        
+        '''
+        #TODO: check if eos is the same for smaller and bigger model
+        
+        generate_context_manager = nullcontext if not self._peft_has_been_casted_to_bf16 else torch.cuda.amp.autocast
+
+        generation_kwargs = {"max_length":self.max_length,
+                "pad_token_id":self.tokenizer.pad_token_id,}
+        
+        with generate_context_manager():
+            policy_output = model.generate(
+                input_ids=batch["prompt_input_ids"],
+                attention_mask=batch["prompt_attention_mask"],
+                do_sample=True,
+                logits_processor=SumProcessor(self.basis_model, **generation_kwargs),
+                **generation_kwargs
+            )
+
+            # if reference_output in batch use that otherwise use the reference model
+            if "reference_output" in batch:
+                reference_output = batch["reference_output"]
+            else:
+                if self.ref_model is None:
+                    with self.null_ref_context():
+                        reference_output = self.model.generate(
+                            input_ids=batch["prompt_input_ids"],
+                            attention_mask=batch["prompt_attention_mask"],
+                            max_length=self.max_length,
+                            do_sample=True,
+                            pad_token_id=self.tokenizer.pad_token_id,
+                        )
+                else:
+                    reference_output = self.ref_model.generate(
+                        input_ids=batch["prompt_input_ids"],
+                        attention_mask=batch["prompt_attention_mask"],
+                        max_length=self.max_length,
+                        do_sample=True,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                    )
+
+        policy_output = pad_to_length(policy_output, self.max_length, self.tokenizer.pad_token_id)
+        policy_output_decoded = self.tokenizer.batch_decode(policy_output, skip_special_tokens=True)
+
+        reference_output = pad_to_length(reference_output, self.max_length, self.tokenizer.pad_token_id)
+        reference_output_decoded = self.tokenizer.batch_decode(reference_output, skip_special_tokens=True)
+
+        return policy_output_decoded, reference_output_decoded
+        
+        
+
     
     # def get_batch_samples(self,
     #                       model,

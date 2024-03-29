@@ -97,7 +97,38 @@ class ModelLogitsProcessor(LogitsProcessor):
         
         return self._calc_next_token_logits(input_ids, scores) + scores   
             
+
+class SumProcessor(LogitsProcessor):
+    
+    def __init__(self,
+                 basis_model,
+                 *args,
+                 basis_model_generation_kwargs=None,
+                 **kwargs):
         
+        super().__init__(*args, **kwargs)
+        self.basis_model = basis_model
+        self.basis_model_generation_kwargs = basis_model_generation_kwargs
+
+        
+    def _calc_next_token_logits(self,
+                                input_ids
+                                ):
+        
+        with torch.inference_mode():                           
+            basis_next_token_logits = self.basis_model(input_ids=input_ids
+                                                       **self.basis_model_generation_kwargs).logits 
+            
+        return basis_next_token_logits
+            
+    def __call__(self, 
+                 input_ids, 
+                 scores):
+
+        
+        return self._calc_next_token_logits(input_ids) + scores         
+        
+         
 
 
 
@@ -259,6 +290,9 @@ def update_get_logits_warper(original_method, model, model_generation_config=Non
         return logits_warper_lst
     
     return wrapper
+
+
+
     
     
 
