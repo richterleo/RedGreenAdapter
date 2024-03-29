@@ -279,7 +279,8 @@ def train_dpo(config, script_args, targs):
     with time_block('Block 7'):
         print("Now starting the training")
         trainer.train()
-        trainer.save_model(training_args.output_dir)
+        trainer.evaluate()
+#        trainer.save_model(training_args.output_dir)
     
     
 
