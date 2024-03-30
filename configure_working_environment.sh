@@ -31,7 +31,7 @@ conda env create -f environment.yml
 echo "conda activate redgreenvenv" >> ~/.bashrc
 
 # Activate the Conda environment
-source conda activate redgreenvenv
+conda activate redgreenvenv
 
 # Add trl library
 pip install -U git+https://github.com/huggingface/trl
