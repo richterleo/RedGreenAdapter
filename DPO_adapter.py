@@ -135,7 +135,7 @@ class DPOTrainerForProducts(DPOTrainer):
                 input_ids=batch["prompt_input_ids"],
                 attention_mask=batch["prompt_attention_mask"],
                 do_sample=True,
-                logits_processor=SumProcessor(self.basis_model, **generation_kwargs),
+                logits_processor=SumProcessor(self.basis_model, basis_model_generation_kwargs=generation_kwargs),
                 **generation_kwargs
             )
 
