@@ -115,9 +115,12 @@ class SumProcessor(LogitsProcessor):
                                 input_ids
                                 ):
         
-        with torch.inference_mode():                           
-            basis_next_token_logits = self.basis_model(input_ids=input_ids
-                                                       **self.basis_model_generation_kwargs).logits 
+        with torch.inference_mode(): 
+            if self.basis_model_generation_kwargs:                          
+                basis_next_token_logits = self.basis_model(input_ids=input_ids,
+                                                        **self.basis_model_generation_kwargs).logits[:, -1, :]
+            else:
+                basis_next_token_logits = self.basis_model(input_ids=input_ids).logits[:, -1, :]
             
         return basis_next_token_logits
             

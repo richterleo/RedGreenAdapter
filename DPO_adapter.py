@@ -11,6 +11,8 @@ from transformers import (
     AutoModelForCausalLM
 )
 from trl import DPOTrainer
+from trl.trainer.utils import pad_to_length
+
 
 from product_of_experts import update_get_logits_warper, SumProcessor
 
@@ -126,17 +128,15 @@ class DPOTrainerForProducts(DPOTrainer):
         #TODO: check if eos is the same for smaller and bigger model
         
         generate_context_manager = nullcontext if not self._peft_has_been_casted_to_bf16 else torch.cuda.amp.autocast
-
-        generation_kwargs = {"max_length":self.max_length,
-                "pad_token_id":self.tokenizer.pad_token_id,}
         
         with generate_context_manager():
             policy_output = model.generate(
                 input_ids=batch["prompt_input_ids"],
                 attention_mask=batch["prompt_attention_mask"],
+                max_length =self.max_length,
+                pad_token_id = self.tokenizer.pad_token_id,
                 do_sample=True,
-                logits_processor=SumProcessor(self.basis_model, basis_model_generation_kwargs=generation_kwargs),
-                **generation_kwargs
+                logits_processor=[SumProcessor(self.basis_model)],
             )
 
             # if reference_output in batch use that otherwise use the reference model

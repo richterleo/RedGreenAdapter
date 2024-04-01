@@ -2,8 +2,6 @@ import argparse
 import configparser
 import torch
 
-
-
 from copy import deepcopy
 from torch.optim import Adam
 from tqdm import tqdm
@@ -217,9 +215,9 @@ def train_dpo(config, script_args, targs):
 
     
         model_kwargs = dict(
-            revision=model_config.model_revision,
-            trust_remote_code=model_config.trust_remote_code,
-            attn_implementation=model_config.attn_implementation,
+            revision=model_config.model_revision, # The specific model version to use. It can be a branch name, a tag name, or a commit id, since we use a git-based system for storing models and other artifacts on huggingface.co, so revision can be any identifier allowed by git.
+            trust_remote_code=model_config.trust_remote_code, # Whether or not to allow for custom models defined on the Hub in their own modeling files. This option should only be set to True for repositories you trust and in which you have read the code, as it will execute code present on the Hub on your local machine.
+            attn_implementation=model_config.attn_implementation, # The attention implementation to use in the model (if relevant). Can be any of "eager" (manual implementation of the attention), "sdpa" (using F.scaled_dot_product_attention), or "flash_attention_2" (using Dao-AILab/flash-attention). By default, if available, SDPA will be used for torch>=2.1.1. The default is otherwise the manual "eager" implementation.
             torch_dtype=torch_dtype,
             use_cache=False if training_args.gradient_checkpointing else True,
             device_map=get_kbit_device_map() if quantization_config is not None else None,
