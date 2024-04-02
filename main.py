@@ -1,8 +1,11 @@
 import argparse
 import configparser
+import logging
 import os
+import sys
+import wandb
 
-from tqdm import tqdm
+from pathlib import Path
 from typing import Optional
 
 from arguments import PPOArgs, DPOArgs, training_args
@@ -13,6 +16,32 @@ os.environ["WANDB_API_KEY"] = "1c84a4abed1d390fbe37478c7cb82a84e4650881"
 os.environ["WANDB_LOG_LEVEL"] = "debug"
 os.environ["WANDB_DISABLE_FORK"] = "true"
                              
+# # Create a custom logger
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.DEBUG)
+
+# # Create handlers
+# file_handler = logging.FileHandler('output.log')
+# file_handler.setLevel(logging.INFO)
+
+# # Create formatters and add it to handlers
+# log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# file_handler.setFormatter(log_format)
+
+# # Add handlers to the logger
+# logger.addHandler(file_handler)
+
+# # Replace print with logging
+# print = logger.info
+
+# # Now, instead of using print statements, use logger.info, logger.warning, etc.
+# logger.info("This is an info message.")
+# logger.warning("This is a warning message.")
+
+# # Redirect stderr to the log file as well
+# sys.stderr = open('output.log', 'a')
+
+
 
 if __name__ == "__main__":
     
@@ -36,7 +65,12 @@ if __name__ == "__main__":
         
     elif args.rl_method == "DPO":
         print(f"We are using wandb: {training_args['report_to']}")
-        train_dpo(config_dict, DPOArgs, training_args)
+        run_name = train_dpo(config_dict, DPOArgs, training_args)
+        
+        api = wandb.Api()
+        run = api.run(run_name)
+        if Path('output.txt').exists():
+            run.file('output.txt').upload()
     
 
 

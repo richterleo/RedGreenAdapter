@@ -56,7 +56,7 @@ class DPOArgs:
             "https://github.com/huggingface/transformers/issues/22482#issuecomment-1595790992"
         },
     )
-    generate_during_eval: bool = field(default=False, metadata={"help": "Generate during evaluation"})
+    generate_during_eval: bool = field(default=True, metadata={"help": "Generate during evaluation"})
     
     # model_name_or_path: str= field(default="gpt2", metadata={"help": "only train on 1000 samples"})
     # per_device_train_batch_size: int = field(default=4, metadata={"help": "only train on 1000 samples"})
@@ -76,12 +76,14 @@ class DPOArgs:
     
 training_args = {
     "model_name_or_path" :"gpt2",
-    "per_device_train_batch_size": 1,
-    "max_steps": 1000,
+    "per_device_train_batch_size": 2,
+    "max_steps": 10000,
     "learning_rate": 1e-3,
     "gradient_accumulation_steps" :1,
     "logging_steps": 100,
-    "eval_steps" :500,
+    "log_level" : 'debug',
+    "evaluation_strategy": "steps",
+    "eval_steps" :2000,
     "output_dir":"dpo_anthropic_hh",
     "warmup_steps" :150,
     "report_to": "wandb",
@@ -89,7 +91,7 @@ training_args = {
     "generate_during_eval": True,
     "run_name": create_run_string(),
     # "no_remove_unused_columns":True
-    "bf16": True}
+    "bf16": False}
     # bf16,
     # logging_first_step)
   

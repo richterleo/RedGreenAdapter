@@ -209,9 +209,8 @@ def train_dpo(config, script_args, targs):
     # Model & Tokenizer
     ################
     
-        torch_dtype = torch.bfloat16 #if available, use torch.bfloat16, but that's not available for gpt family
+        torch_dtype = torch.float16 #if available, use torch.bfloat16, but that's not available for gpt family
         quantization_config = get_quantization_config(model_config)
-
 
     
         model_kwargs = dict(
@@ -237,7 +236,9 @@ def train_dpo(config, script_args, targs):
     
     with time_block('Block 3'):
         print("Now loading the basis model")
-        basis_model = AutoModelForCausalLM.from_pretrained(config['models']['basis_model_name']) # torch_dtype=torch.bfloat16 not available for gpt2
+        basis_model = AutoModelForCausalLM.from_pretrained(
+            config['models']['basis_model_name'],
+            **model_kwargs) # torch_dtype=torch.bfloat16 not available for gpt2
         ref_model = deepcopy(basis_model)
     
     with time_block('Block 4'):
@@ -277,10 +278,10 @@ def train_dpo(config, script_args, targs):
     with time_block('Block 7'):
         print("Now starting the training")
         trainer.train()
-        trainer.evaluate()
+        trainer.evaluate() # is this still needed if we do evaluation on the fly anyway?
 #        trainer.save_model(training_args.output_dir)
     
-    
+    return training_args['run_name']
 
 if __name__ == "__main__":
     
