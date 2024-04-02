@@ -67,10 +67,10 @@ if __name__ == "__main__":
         print(f"We are using wandb: {training_args['report_to']}")
         run_name = train_dpo(config_dict, DPOArgs, training_args)
         
-        api = wandb.Api()
-        run = api.run(run_name)
-        if Path('output.txt').exists():
-            run.file('output.txt').upload()
+        # api = wandb.Api()
+        # run = api.run(run_name)
+        # if Path('output.txt').exists():
+        #     run.file('output.txt').upload()
     
 
 

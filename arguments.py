@@ -76,7 +76,7 @@ class DPOArgs:
     
 training_args = {
     "model_name_or_path" :"gpt2",
-    "per_device_train_batch_size": 2,
+    "per_device_train_batch_size": 1,
     "max_steps": 10000,
     "learning_rate": 1e-3,
     "gradient_accumulation_steps" :1,
