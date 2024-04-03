@@ -109,7 +109,7 @@ def get_hh(split: str, sanity_check: bool = False, silent: bool = False, cache_d
     """
     dataset = load_dataset("Anthropic/hh-rlhf", split=split, cache_dir=cache_dir)
     if sanity_check:
-        dataset = dataset.select(range(min(len(dataset), 10000)))
+        dataset = dataset.select(range(min(len(dataset), 1000)))
 
     def split_prompt_and_responses(sample) -> Dict[str, str]:
         prompt = extract_anthropic_prompt(sample["chosen"])

@@ -209,7 +209,7 @@ def train_dpo(config, script_args, targs):
     # Model & Tokenizer
     ################
     
-        torch_dtype = torch.float16 #if available, use torch.bfloat16, but that's not available for gpt family
+        torch_dtype = torch.float32 #if available, use torch.bfloat16, but that's not available for gpt family
         quantization_config = get_quantization_config(model_config)
 
     
@@ -277,6 +277,7 @@ def train_dpo(config, script_args, targs):
     
     with time_block('Block 7'):
         print("Now starting the training")
+
         trainer.train()
         trainer.evaluate() # is this still needed if we do evaluation on the fly anyway?
 #        trainer.save_model(training_args.output_dir)

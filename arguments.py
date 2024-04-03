@@ -47,7 +47,7 @@ class DPOArgs:
     max_target_length: int = field(
         default=128, metadata={"help": "Only used for encoder decoder model. Max target of each sample's prompt"}
     )
-    sanity_check: bool = field(default=True, metadata={"help": "only train on 1000 samples"})
+    sanity_check: bool = field(default=False, metadata={"help": "only train on 1000 samples"})
     ignore_bias_buffers: bool = field(
         default=False,
         metadata={
@@ -76,8 +76,9 @@ class DPOArgs:
     
 training_args = {
     "model_name_or_path" :"gpt2",
-    "per_device_train_batch_size": 1,
-    "max_steps": 10000,
+    "per_device_train_batch_size": 2,
+    "per_device_eval_batch_size": 2,
+    "max_steps": -1,
     "learning_rate": 1e-3,
     "gradient_accumulation_steps" :1,
     "logging_steps": 100,
@@ -89,9 +90,9 @@ training_args = {
     "report_to": "wandb",
     # "load_best_model_at_end": True,
     "generate_during_eval": True,
-    "run_name": create_run_string(),
+    "run_name": create_run_string()}
     # "no_remove_unused_columns":True
-    "bf16": False}
+    # "fp16": True}
     # bf16,
     # logging_first_step)
   
