@@ -1,3 +1,14 @@
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize
+from sklearn.feature_extraction.text import CountVectorizer
+
+# Download necessary NLTK resources
+nltk.download('punkt')
+nltk.download('stopwords')
+
+
 import configparser
 import time
 from contextlib import contextmanager
@@ -22,6 +33,8 @@ from trl import (
 )
 
 from trl.core import LengthSampler
+
+
 
 # Below is an example function to build the dataset. In our case, we use the IMDB dataset
 # from the `datasets` library. One should customize this function to train the model on
@@ -120,6 +133,64 @@ def get_hh(split: str, sanity_check: bool = False, silent: bool = False, cache_d
         }
 
     return dataset.map(split_prompt_and_responses)
+
+
+def build_new_dataset(train_dataset):
+    # This list will hold the new dataset
+    new_text_samples = []
+    new_label_samples = []
+    
+    # Iterate through each index in the original dataset
+    for idx in range(len(train_dataset['prompt'])):
+        prompt = train_dataset['prompt'][idx]
+        chosen_continuation = train_dataset['chosen'][idx]
+        rejected_continuation = train_dataset['rejected'][idx]
+
+        # Process the 'chosen' continuation
+        chosen_words = chosen_continuation.split()
+        for i in range(1, len(chosen_words) + 1):
+            # Concatenate prompt with the first i words of the 'chosen' continuation
+            sample_text = prompt + " " + " ".join(chosen_words[:i])
+            # Append the (text, label) tuple to the new_samples list
+            new_text_samples.append(sample_text)
+            new_label_samples.append(1)
+
+        # Process the 'rejected' continuation
+        rejected_words = rejected_continuation.split()
+        for i in range(1, len(rejected_words) + 1):
+            # Concatenate prompt with the first i words of the 'rejected' continuation
+            sample_text = prompt + " " + " ".join(rejected_words[:i])
+            # Append the (text, label) tuple to the new_samples list
+            new_text_samples.append(sample_text)
+            new_label_samples.append(0)
+
+    return Dataset.from_dict({'text': new_text_samples, 'label': new_label_samples})
+
+
+def preprocess_sample(sample):
+    # Convert text to lowercase
+    
+    def preprocess_text(text):
+        text = text.lower()
+
+        # Tokenize text
+        tokens = word_tokenize(text)
+
+        # Remove stopwords
+        stop_words = set(stopwords.words('english'))
+        filtered_tokens = [token for token in tokens if token not in stop_words]
+
+        # Optional: Stemming
+        # stemmer = PorterStemmer()
+        # stemmed_tokens = [stemmer.stem(token) for token in filtered_tokens]
+
+        # Rejoin tokens into a string
+        return " ".join(filtered_tokens)
+    
+    sample['text'] = preprocess_text(sample['text'])
+
+    return sample
+
 
 
 def create_run_string():
