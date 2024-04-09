@@ -34,6 +34,7 @@ class BOG:
         X_train = self.vectorizer.fit_transform(preprocessed_train_dataset['text'])
 
         assert X_train.shape[0] == len(preprocessed_train_dataset['label'])
+        print(f"{X_train.shape[0]} training samples")
 
         X_train, y_train = shuffle(X_train, preprocessed_train_dataset['label'], random_state=self.random_state)
 
@@ -41,6 +42,11 @@ class BOG:
         with time_block('Block 3: Train logistic regressor'):
             self.model.fit(X_train, y_train)
             print("Training finished.")
+            
+        y_pred = self.model.predict(X_train)
+        print("Accuracy on train:", accuracy_score(y_train, y_pred))
+        print("Classification Report on train:\n", classification_report(y_train, y_pred))
+        
         
     def eval(self, num_samples=0):
         
@@ -60,8 +66,8 @@ class BOG:
         
         y_pred = self.model.predict(X_test)
         
-        print("Accuracy:", accuracy_score(y_test, y_pred))
-        print("Classification Report:\n", classification_report(y_test, y_pred))
+        print("Accuracy on test:", accuracy_score(y_test, y_pred))
+        print("Classification Report on test:\n", classification_report(y_test, y_pred))
         
         if num_samples > 0:
             # Choose multiple random samples to display
