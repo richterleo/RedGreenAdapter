@@ -89,7 +89,7 @@ class BOG:
 
 if __name__ == "__main__":
     
-    bog = BOG(sanity_check=False)
+    bog = BOG(sanity_check=True)
     bog.train()
     bog.eval(num_samples=10)
         
