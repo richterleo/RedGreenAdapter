@@ -27,7 +27,7 @@ class BOG:
         with time_block('Block 1: Create unraveled dataset'):
             unraveled_train_dataset = build_new_dataset(train_dataset)
 
-        with time_block('Block 1: Preprocess and feature extraction'):    
+        with time_block('Block 2: Preprocess and feature extraction'):    
             # Preprocess each sample in the new dataset
             preprocessed_train_dataset = unraveled_train_dataset.map(preprocess_sample)
             
@@ -38,7 +38,9 @@ class BOG:
         X_train, y_train = shuffle(X_train, preprocessed_train_dataset['label'], random_state=self.random_state)
 
         # train logistic regression classifier
-        self.model.fit(X_train, y_train)
+        with time_block('Block 3: Train logistic regressor'):
+            self.model.fit(X_train, y_train)
+            print("Training finished.")
         
     def eval(self, num_samples=0):
         
@@ -47,7 +49,7 @@ class BOG:
         with time_block('Block 1: Create unraveled dataset'):
             unraveled_eval_dataset = build_new_dataset(eval_dataset)
             
-        with time_block('Block 1: Preprocess and feature extraction'):    
+        with time_block('Block 2: Preprocess and feature extraction'):    
             # Preprocess each sample in the new dataset
             preprocessed_test_dataset = unraveled_eval_dataset.map(preprocess_sample)
             
@@ -63,7 +65,8 @@ class BOG:
         
         if num_samples > 0:
             # Choose multiple random samples to display
-            sample_indices = np.random.sample(range(len(y_test)), num_samples)  # Generate random indices without replacement
+            sample_indices = np.random.choice(range(len(y_test)), size=num_samples, replace=False)  # Generate random indices without replacement
+            print(sample_indices)
 
             print("Random Test Samples:")
             for idx in sample_indices:
@@ -80,7 +83,7 @@ class BOG:
 
 if __name__ == "__main__":
     
-    bog = BOG()
+    bog = BOG(sanity_check=True)
     bog.train()
     bog.eval(num_samples=10)
         
